@@ -4,15 +4,15 @@
 #   brew tap Advai-X/advai https://github.com/Advai-X/advai-x-cli
 #   brew install advai
 #
-#   # 方式二（直接下载 .rb 本地安装）：
-#   curl -fsSL https://raw.githubusercontent.com/Advai-X/advai-x-cli/main/Formula/advai.rb > /tmp/advai.rb
-#   brew install --formula /tmp/advai.rb
+#   # 方式二（手动创建本地 tap）：
+#   curl -fsSL https://cdn.jsdelivr.net/gh/Advai-X/advai-x-cli@main/Formula/advai.rb \
+#     > "$(brew --repository)/Library/Taps/advai-x/homebrew-advai/Formula/advai.rb"
+#   brew trust advai-x/advai
+#   brew install advai
 #
 # 新版本发布时，只需更新 url 与 sha256 两项即可。
 
 class Advai < Formula
-  include Language::Python::Virtualenv
-
   desc "跨平台 AI Skill 管理器 — 一键 install / uninstall / list / update"
   homepage "https://github.com/Advai-X/advai-x-cli"
   url "https://github.com/Advai-X/advai-x-cli/archive/refs/tags/v1.0.0.tar.gz"
@@ -21,13 +21,16 @@ class Advai < Formula
 
   depends_on "python@3.11"
 
-  resource "click" do
-    url "https://files.pythonhosted.org/packages/59/87/84326af34517fca8c58418d148f2403df25303e02736832403587318e9e8/click-8.1.3.tar.gz"
-    sha256 "7682dc8afb30297001674575ea00d1814d808d6a36af415a82bd481d37ba7b8e"
-  end
-
   def install
-    virtualenv_install_with_resources
+    # 手动创建 venv 并 pip install（比 virtualenv_install_with_resources 更可控）
+    venv = libexec/"venv"
+    system Formula["python@3.11"].opt_bin/"python3", "-m", "venv", venv
+    system venv/"bin/pip", "install", "--upgrade", "pip"
+    system venv/"bin/pip", "install", "-e", "."
+
+    # 创建 bin/advai 包装脚本，指向 venv 内的 entry point
+    (bin/"advai").write_env_script venv/"bin/advai",
+      PATH: "#{venv/"bin"}:$PATH"
   end
 
   test do
