@@ -8,7 +8,7 @@ version = "1.0.0"
 description = "跨平台 AI Skill 管理器 — 一键 install / uninstall / list / update"
 readme = "README.md"
 requires-python = ">=3.8"
-license = { text = "MIT" }
+license = "MIT"
 authors = [{ name = "advai" }]
 dependencies = [
     "click>=8.1",
