@@ -1,4 +1,4 @@
-class AdvaiCli < Formula
+class Advai < Formula
   desc "A cross-platform CLI tool."
   homepage "https://pypi.org/project/advai-cli/"
   url "https://files.pythonhosted.org/packages/8c/f1/d365949065369246da5fa2f70aed3dd67f3b609506ffd58ac38a66453939/advai_cli-1.0.3.tar.gz"
