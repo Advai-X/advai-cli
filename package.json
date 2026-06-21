@@ -9,8 +9,11 @@
     "postinstall": "node ./bin/check-python.js"
   },
   "files": [
-    "advai/",
-    "bin/",
+    "advai/__init__.py",
+    "advai/cli.py",
+    "advai/skills.py",
+    "bin/advai.js",
+    "bin/check-python.js",
     "README.md"
   ],
   "keywords": ["ai", "skills", "cli", "automation"],
