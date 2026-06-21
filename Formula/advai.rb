@@ -1,28 +1,26 @@
-# Homebrew formula for advai — usage:
+# Homebrew formula for advai
 #
-#   # Recommended (standard tap flow):
-#   brew tap Advai-X/advai https://github.com/Advai-X/advai-x-cli
-#   brew install advai
+# Usage: save this file and install via a local tap:
+#   1. mkdir -p "$(brew --repository)/Library/Taps/advai/homebrew-advai/Formula"
+#   2. cp advai.rb "$(brew --repository)/Library/Taps/advai/homebrew-advai/Formula/advai.rb"
+#   3. brew install advai
 #
-#   # Alternative: install from the local formula file:
-#   curl -fsSL https://cdn.jsdelivr.net/gh/Advai-X/advai-x-cli@main/Formula/advai.rb \
-#     > "$(brew --repository)/Library/Taps/advai-x/homebrew-advai/Formula/advai.rb"
-#   brew install advai
-#
-# To ship a new release, bump the version and sha256 below.
+# To ship a new release: bump the version and replace the sha256 below.
+# The sha256 can be computed with:
+#   curl -sL https://pypi.io/packages/source/a/advai-cli/advai-cli-1.0.2.tar.gz | shasum -a 256
 
 class Advai < Formula
-  desc "Cross-platform AI Skill manager — one-click install / uninstall / list / update"
-  homepage "https://github.com/Advai-X/advai-x-cli"
-  url "https://github.com/Advai-X/advai-x-cli/archive/refs/tags/v1.0.1.tar.gz"
-  sha256 "22fcb0cd36f6d3d6ddbce28beb2942095710cc30e015113b287685cf466142b9"
+  desc "Cross-platform AI Skill manager"
+  homepage "https://pypi.org/project/advai-cli/"
+  url "https://pypi.io/packages/source/a/advai-cli/advai-cli-1.0.2.tar.gz"
+  sha256 "271168c629006e07469395df025b75620c46ce2185037b07598e20a33b3fbd00"
   license "MIT"
 
   depends_on "python@3.11"
 
   def install
-    # Create a private venv and pip-install the package, then symlink
-    # `bin/advai` so it is available on the user's PATH after `brew install`.
+    # Create a private venv, pip install the package, then symlink
+    # the advai binary into the prefix so it is available on PATH.
     venv = libexec/"venv"
     system Formula["python@3.11"].opt_bin/"python3", "-m", "venv", venv
     system venv/"bin/pip", "install", "--upgrade", "pip"

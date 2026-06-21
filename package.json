@@ -1,7 +1,7 @@
 {
   "name": "advai-cli",
-  "version": "1.0.1",
-  "description": "Cross-platform AI Skill manager — one-click install / uninstall / list / update",
+  "version": "1.0.2",
+  "description": "Cross-platform AI Skill manager",
   "bin": {
     "advai": "./bin/advai.js"
   },
@@ -13,12 +13,6 @@
     "bin/",
     "README.md"
   ],
-  "repository": {
-    "type": "git",
-    "url": "https://github.com/Advai-X/advai-x-cli.git"
-  },
-  "homepage": "https://github.com/Advai-X/advai-x-cli",
-  "bugs": "https://github.com/Advai-X/advai-x-cli/issues",
   "keywords": ["ai", "skills", "cli", "automation"],
   "license": "MIT",
   "engines": {

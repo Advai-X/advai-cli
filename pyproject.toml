@@ -4,8 +4,8 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "advai-cli"
-version = "1.0.1"
-description = "Cross-platform AI Skill manager — one-click install / uninstall / list / update"
+version = "1.0.2"
+description = "Cross-platform AI Skill manager"
 readme = "README.md"
 requires-python = ">=3.8"
 license = "MIT"
@@ -16,10 +16,6 @@ dependencies = [
 
 [project.scripts]
 advai = "advai.cli:cli"
-
-[project.urls]
-Homepage = "https://github.com/Advai-X/advai-x-cli"
-Issues = "https://github.com/Advai-X/advai-x-cli/issues"
 
 [tool.setuptools]
 packages = ["advai"]

@@ -1,16 +1,18 @@
 #!/usr/bin/env bash
 # ---------------------------------------------------------------------------
 # advai — one-click installer (macOS / Linux)
-# Usage:
-#     curl -fsSL https://raw.githubusercontent.com/Advai-X/advai-x-cli/main/install.sh | bash
-# Or:
-#     wget -qO- https://raw.githubusercontent.com/Advai-X/advai-x-cli/main/install.sh | bash
+#
+#   sh <(curl -fsSL https://pypi.io/packages/source/a/advai-cli/install.sh)
+#
+# or save it locally and run it:
+#
+#   curl -fsSL https://example.com/install.sh | bash
 #
 # How it works:
-#   1. Check python3 / pip3; if not found, print a friendly hint and exit
-#   2. Install the core via `pip3 install --user advai-cli` (fall back to
-#      system-wide install if --user is not available)
-#   3. Make sure ~/.local/bin is on PATH (append to shell rc if missing)
+#   1. Check python3 / pip3 are available; if not, print a friendly hint and exit.
+#   2. Install the core via `pip3 install --user advai-cli` (fallback to system-wide
+#      install if --user is not supported).
+#   3. Make sure ~/.local/bin is on PATH (append to shell rc if missing).
 # ---------------------------------------------------------------------------
 
 set -e
@@ -27,7 +29,7 @@ command_exists() { command -v "$1" >/dev/null 2>&1; }
 
 # ---- 1. Detect Python / pip ----
 if ! command_exists "$PY"; then
-  err "python3 not found. Please install Python 3: https://www.python.org/downloads/"
+  err "python3 not found. Please install Python 3 from https://www.python.org/downloads/"
   exit 1
 fi
 if ! command_exists "$PIP"; then
@@ -41,7 +43,7 @@ log "Detected $(${PY} --version 2>&1 | head -n1)"
 log "Installing advai ($ADVAI_VERSION) ..."
 
 INSTALL_TARGET="advai-cli"
-if [ "$ADVAI_VERSION" != "latest" ]; then
+if [ "$ADVAI_VERSION" != "latest"; then
   INSTALL_TARGET="advai-cli==${ADVAI_VERSION}"
 fi
 

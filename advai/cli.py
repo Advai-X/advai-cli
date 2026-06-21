@@ -1,8 +1,8 @@
 import click
 import os
 import sys
-import json
 
+from advai import __version__
 from advai.skills import install_skill, uninstall_skill, list_skills, update_skill, info_skill
 
 SKILLS_DIR = os.path.expanduser("~/.advai/skills")
@@ -15,7 +15,7 @@ def _ensure_dirs():
 
 
 @click.group()
-@click.version_option(package_name="advai-cli")
+@click.version_option(version=__version__, prog_name="advai")
 def cli():
     """advai — cross-platform AI Skill manager"""
     _ensure_dirs()
