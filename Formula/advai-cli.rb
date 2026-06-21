@@ -8,28 +8,25 @@ class AdvaiCli < Formula
   depends_on "python@3.11"
 
   resource "click" do
-    url "https://files.pythonhosted.org/packages/c7/0d/67e5b4109ea4a837e80daa87c2c696711955e40449a97e8926672534def2/click-8.4.1-py3-none-any.whl"
-    sha256 "482be17c6991b8c19c5429a1e995d9b0efdbb63172824c41f99965dc0ade8ec2"
+    url "https://files.pythonhosted.org/packages/9b/98/518d8e5081007684232226f475082b30087d0f585e8457db087298259f49/click-8.4.1.tar.gz"
+    sha256 "918b5633eddf6b41c32d4f454bf0de810065c74e3f7dbf8ee5452f8be88d3e96"
   end
 
   def install
-    # Create an isolated virtualenv under libexec so the advai entry-point
-    # resolves against a private, self-contained Python interpreter.
-    venv = libexec/"venv"
-    system Formula["python@3.11"].opt_bin/"python3", "-m", "venv", venv
-    system venv/"bin/pip", "install", "--upgrade", "pip"
+    python = Formula["python@3.11"].opt_bin/"python3.11"
 
-    # Install vendored dependencies (no network access during brew build)
     resource("click").stage do
-      system venv/"bin/pip", "install", "--no-deps", "."
+      system python, "-m", "pip", "install", "--no-deps",
+             "--target=#{libexec}", "."
     end
 
-    # Install the main package
-    system venv/"bin/pip", "install", "--no-deps", "."
+    system python, "-m", "pip", "install", "--no-deps",
+           "--target=#{libexec}", "."
 
-    # Expose the "advai" binary on PATH
-    (bin/"advai").write_env_script venv/"bin/advai",
-      PATH: "#{venv/"bin"}:$PATH"
+    (bin/"advai").write <<~EOS
+      #!/bin/bash
+      PYTHONPATH="#{libexec}" exec "#{python}" -c "from advai.cli import cli; cli()" "$@"
+    EOS
   end
 
   test do
