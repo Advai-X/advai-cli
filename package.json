@@ -1,7 +1,15 @@
 {
   "name": "advai-cli",
   "version": "1.0.4",
-  "description": "A cross-platform CLI tool.",
+  "description": "CLI for managing skills and external CLIs.",
+  "homepage": "https://github.com/Advai-X/advai-x-cli",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Advai-X/advai-x-cli.git"
+  },
+  "bugs": {
+    "url": "https://github.com/Advai-X/advai-x-cli/issues"
+  },
   "bin": {
     "advai": "./bin/advai.js"
   },
@@ -15,6 +23,7 @@
     "advai/skills.py",
     "bin/advai.js",
     "bin/check-python.js",
+    "LICENSE",
     "README.md"
   ],
   "keywords": ["ai", "skills", "cli", "automation"],

@@ -12,7 +12,7 @@ from advai.cli_manager import (
     build_cli_exec_command,
     build_external_cli_install_command,
     opencli_available,
-    build_update_command,
+    build_recommended_update_command,
     run_manager_command,
     run_passthrough_command,
 )
@@ -30,7 +30,7 @@ def _ensure_dirs():
 @click.group()
 @click.version_option(version=__version__, prog_name="advai")
 def cli():
-    """advai — a cross-platform CLI tool."""
+    """Manage AdvAI skills and external CLIs."""
     _ensure_dirs()
 
 
@@ -140,14 +140,14 @@ def self_info_cmd():
 
 @cli.command(name="update")
 def self_update_cmd():
-    """Update advai itself."""
-    command = build_update_command("pip")
+    """Show the recommended package-manager update command."""
+    command = build_recommended_update_command()
     click.echo(f"Recommended update command: {' '.join(command)}")
 
 
 @cli.group(name="skill")
 def skill_admin():
-    """Manage Skills with a structured command group."""
+    """Manage AdvAI skills."""
 
 
 @skill_admin.command(name="install")

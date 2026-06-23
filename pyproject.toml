@@ -5,7 +5,7 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "advai-cli"
 version = "1.0.4"
-description = "A cross-platform CLI tool."
+description = "CLI for managing skills and external CLIs."
 readme = "README.md"
 requires-python = ">=3.8"
 license = "MIT"
@@ -13,6 +13,11 @@ authors = [{ name = "advai" }]
 dependencies = [
     "click>=8.1",
 ]
+
+[project.urls]
+Homepage = "https://github.com/Advai-X/advai-x-cli"
+Repository = "https://github.com/Advai-X/advai-x-cli"
+Issues = "https://github.com/Advai-X/advai-x-cli/issues"
 
 [project.scripts]
 advai = "advai.cli:cli"

@@ -227,6 +227,11 @@ def build_update_command(manager: str) -> list:
     raise ValueError(f"Unsupported manager: {manager}")
 
 
+def build_recommended_update_command() -> list:
+    manager = resolve_manager()
+    return build_update_command(manager)
+
+
 def build_uninstall_command(manager: str) -> list:
     if manager == "pip":
         return [sys.executable, "-m", "pip", "uninstall", "-y", PACKAGE_NAME]
