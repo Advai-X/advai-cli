@@ -44,6 +44,7 @@ It is designed as a lightweight Python-first core with npm and Homebrew distribu
 - Inspect the current installation, runtime, and recommended update command with `advai info` and `advai update`
 - Manage locally installed skills with install, list, info, update, and uninstall commands
 - Discover and install supported third-party CLIs through the OpenCLI ecosystem
+- Create local knowledge bases, add documents, search content, and resync from source files
 - Proxy supported external CLIs through `advai cli <name> ...`
 - Launch a terminal chat UI with configurable model, base URL, system prompt, and transcript export
 
@@ -155,12 +156,20 @@ advai tui
 | `advai skill list` | List locally installed skills |
 | `advai skill info <name>` | Show local metadata for a skill |
 | `advai skill install <name>` | Install a local skill entry |
+| `advai skill install <github-url> [--skill <name>]` | Install skill definitions from a GitHub repo |
 | `advai skill update [name]` | Refresh one or all installed skills |
 | `advai skill uninstall <name>` | Remove an installed skill |
 | `advai cli list` | List installable external CLIs from OpenCLI |
 | `advai cli info <name>` | Show details for an external CLI |
 | `advai cli install <name> --yes` | Install an external CLI without confirmation |
+| `advai cli install <github-url> [--cli <name>]` | Register external CLI definitions from a GitHub repo |
+| `advai cli update <name> --yes` | Update an external CLI without confirmation |
+| `advai cli uninstall <name> --yes` | Uninstall an external CLI without confirmation |
 | `advai cli <name> ...` | Execute a supported external CLI through `advai` |
+| `advai kb create <name>` | Create a local knowledge base |
+| `advai kb doc add <name> <path>` | Copy a document into a knowledge base |
+| `advai kb search <name> <query>` | Search stored knowledge base documents |
+| `advai kb sync <name>` | Refresh stored documents from their source files |
 
 ## AI TUI
 
@@ -222,14 +231,19 @@ Skills are stored locally under `~/.advai/skills`.
 advai skill list
 advai skill info demo-skill
 advai skill install demo-skill
+advai skill install https://github.com/your-org/skill-repo
+advai skill install https://github.com/your-org/skill-repo --skill demo-skill
 advai skill update demo-skill
 advai skill uninstall demo-skill
 ```
 
 Current scope:
 
-- Skill installation and update currently manage local metadata and directory lifecycle
-- This keeps the implementation lightweight and leaves room for future remote registry or download workflows
+- Plain skill names still create a lightweight local placeholder skill
+- GitHub installs read from the repository root `skills/` directory instead of copying the whole repo
+- If the repo `skills/` directory contains one skill, `advai` installs it automatically
+- If the repo `skills/` directory contains multiple skills, `advai` prompts whether to install all of them; use `--skill <name>` to choose one explicitly
+- `advai skill update <name>` reuses the saved GitHub repo URL and selected skill directory when the installed skill came from GitHub
 
 ## External CLI Integration
 
@@ -239,14 +253,43 @@ External CLI support is powered by `opencli`.
 advai cli list
 advai cli info demo-cli
 advai cli install demo-cli --yes
+advai cli install https://github.com/your-org/cli-repo
+advai cli install https://github.com/your-org/cli-repo --cli demo-cli
+advai cli update demo-cli --yes
+advai cli uninstall demo-cli --yes
 advai cli demo-cli --help
 ```
 
 Notes:
 
-- `advai cli list`, `advai cli info`, and `advai cli install` require `opencli` to be installed and available on `PATH`
+- `advai cli list`, `advai cli info`, `advai cli install`, `advai cli update`, and `advai cli uninstall` require `opencli` to be installed and available on `PATH`
+- GitHub CLI installs read from the repository root `clis/` directory and register each selected CLI via `opencli external register`
+- If the repo `clis/` directory contains multiple CLIs, `advai` prompts whether to install all of them; use `--cli <name>` to choose one explicitly
 - Dynamic passthrough execution works only for CLIs exposed by the local OpenCLI registry
 - `advai-cli` does not reimplement third-party CLIs; it provides a consistent entrypoint and installation surface
+
+## Knowledge Bases
+
+Knowledge bases are stored locally under `~/.advai/kbs`.
+
+`advai kb` is also designed to be OKF-friendly. Based on the Open Knowledge Format (OKF) direction described by Google Cloud, the current implementation already works well with knowledge bundles that are organized as markdown files on disk, including files that contain YAML frontmatter.
+
+```bash
+advai kb create team-wiki
+advai kb doc add team-wiki ./README.md
+advai kb search team-wiki homebrew
+advai kb sync team-wiki
+```
+
+Current scope:
+
+- `advai kb create <name>` initializes a local knowledge base directory and metadata file
+- `advai kb doc add <name> <path>` copies a source document into the knowledge base and tracks its original path
+- `advai kb search <name> <query>` performs a simple case-insensitive text search over stored document content
+- `advai kb sync <name>` refreshes stored copies from the original source paths and reports any missing files
+- OKF-friendly ingestion: markdown-based knowledge docs can be added directly without conversion
+- YAML frontmatter is preserved as plain text, so OKF metadata remains searchable and does not get stripped during add or sync
+- This version does not yet implement full OKF-aware parsing, validation, or structured metadata querying; it focuses on filesystem-native storage and simple text retrieval first
 
 ## Project Structure
 
@@ -255,6 +298,7 @@ advai/
   ai_client.py      OpenAI-compatible HTTP client
   cli.py            Main CLI entrypoint
   cli_manager.py    Install detection, update commands, OpenCLI integration
+  kb.py             Local knowledge base storage and search helpers
   skills.py         Local skill metadata management
   tui.py            Terminal chat UI
 bin/
@@ -289,6 +333,7 @@ python -m advai.cli info
 ## Operational Notes
 
 - Local state lives under `~/.advai`
+- Knowledge bases are stored under `~/.advai/kbs`
 - Skills are stored under `~/.advai/skills`
 - The recommended self-update command changes depending on whether the tool was installed via `pip`, `npm`, or `brew`
 - npm installation checks for a working Python interpreter during `postinstall`

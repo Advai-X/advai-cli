@@ -1,8 +1,14 @@
+import json
+import io
 import os
+import re
 import shutil
 import subprocess
 import sys
-import json
+import tempfile
+import urllib.error
+import urllib.request
+import zipfile
 from functools import lru_cache
 
 from advai import __version__
@@ -10,12 +16,250 @@ from advai import __version__
 PACKAGE_NAME = "advai-cli"
 BREW_FORMULA = "advai-cli"
 SUPPORTED_MANAGERS = ("pip", "npm", "brew")
+CLIS_DIR = os.path.expanduser("~/.advai/clis")
+GITHUB_REPO_PATTERN = re.compile(
+    r"^https?://github\.com/(?P<owner>[^/]+)/(?P<repo>[^/]+?)(?:\.git)?/?$"
+)
+GITHUB_TREE_PATTERN = re.compile(
+    r"^https?://github\.com/(?P<owner>[^/]+)/(?P<repo>[^/]+?)(?:\.git)?/tree/(?P<ref>.+?)/?$"
+)
 
 
 def _normalize_path(value: str) -> str:
     if not value:
         return ""
     return os.path.realpath(os.path.expanduser(value))
+
+
+def looks_like_github_url(value: str) -> bool:
+    candidate = str(value or "").strip()
+    return bool(GITHUB_REPO_PATTERN.match(candidate) or GITHUB_TREE_PATTERN.match(candidate))
+
+
+def _parse_github_spec(spec: str) -> dict | None:
+    value = str(spec or "").strip()
+    if not value:
+        return None
+
+    tree_match = GITHUB_TREE_PATTERN.match(value)
+    if tree_match:
+        data = tree_match.groupdict()
+        return {
+            "owner": data["owner"],
+            "repo": data["repo"],
+            "ref": data["ref"],
+            "url": f"https://github.com/{data['owner']}/{data['repo']}",
+            "install_spec": value,
+        }
+
+    repo_match = GITHUB_REPO_PATTERN.match(value)
+    if repo_match:
+        data = repo_match.groupdict()
+        return {
+            "owner": data["owner"],
+            "repo": data["repo"],
+            "ref": None,
+            "url": f"https://github.com/{data['owner']}/{data['repo']}",
+            "install_spec": value,
+        }
+    return None
+
+
+def _json_request(url: str) -> dict:
+    request = urllib.request.Request(
+        url,
+        headers={
+            "Accept": "application/vnd.github+json",
+            "User-Agent": "advai-cli",
+        },
+    )
+    try:
+        with urllib.request.urlopen(request, timeout=30) as response:
+            return json.loads(response.read().decode("utf-8"))
+    except urllib.error.HTTPError as exc:
+        raise RuntimeError(f"Failed to fetch GitHub metadata: {exc.reason}") from exc
+    except urllib.error.URLError as exc:
+        raise RuntimeError(f"Unable to reach GitHub: {exc.reason}") from exc
+
+
+def _download_bytes(url: str) -> bytes:
+    request = urllib.request.Request(url, headers={"User-Agent": "advai-cli"})
+    try:
+        with urllib.request.urlopen(request, timeout=60) as response:
+            return response.read()
+    except urllib.error.HTTPError as exc:
+        raise RuntimeError(f"Failed to download GitHub archive: {exc.reason}") from exc
+    except urllib.error.URLError as exc:
+        raise RuntimeError(f"Unable to download GitHub archive: {exc.reason}") from exc
+
+
+def _resolve_github_ref(parsed: dict) -> str:
+    if parsed.get("ref"):
+        return parsed["ref"]
+    repo_api = f"https://api.github.com/repos/{parsed['owner']}/{parsed['repo']}"
+    data = _json_request(repo_api)
+    default_branch = str(data.get("default_branch") or "").strip()
+    if not default_branch:
+        raise RuntimeError("GitHub repository has no default branch")
+    return default_branch
+
+
+def _extract_github_repo(parsed: dict) -> tuple[str, dict]:
+    ref = _resolve_github_ref(parsed)
+    archive_url = (
+        f"https://api.github.com/repos/{parsed['owner']}/{parsed['repo']}/zipball/{ref}"
+    )
+    archive_bytes = _download_bytes(archive_url)
+    temp_dir = tempfile.mkdtemp(prefix="advai-cli-")
+
+    try:
+        with zipfile.ZipFile(io.BytesIO(archive_bytes)) as archive:
+            archive.extractall(temp_dir)
+    except zipfile.BadZipFile as exc:
+        shutil.rmtree(temp_dir, ignore_errors=True)
+        raise RuntimeError("GitHub archive is not a valid zip file") from exc
+
+    entries = [
+        os.path.join(temp_dir, name)
+        for name in os.listdir(temp_dir)
+        if not name.startswith(".")
+    ]
+    repo_root = next((path for path in entries if os.path.isdir(path)), None)
+    if repo_root is None:
+        shutil.rmtree(temp_dir, ignore_errors=True)
+        raise RuntimeError("GitHub archive did not contain a repository directory")
+
+    source = {
+        "type": "github",
+        "url": parsed["url"],
+        "owner": parsed["owner"],
+        "repo": parsed["repo"],
+        "ref": ref,
+        "install_spec": parsed["install_spec"],
+        "archive_url": archive_url,
+    }
+    return repo_root, source
+
+
+def _load_json_if_exists(path: str) -> dict:
+    if not os.path.isfile(path):
+        return {}
+    with open(path, "r", encoding="utf-8") as handle:
+        return json.load(handle)
+
+
+def _cli_meta_path(cli_name: str) -> str:
+    return os.path.join(CLIS_DIR, cli_name, "cli.json")
+
+
+def _list_repo_clis(repo_root: str) -> list[str]:
+    clis_root = os.path.join(repo_root, "clis")
+    if not os.path.isdir(clis_root):
+        raise RuntimeError("GitHub repository does not contain a root-level clis directory")
+    return sorted(
+        name
+        for name in os.listdir(clis_root)
+        if os.path.isdir(os.path.join(clis_root, name)) and not name.startswith(".")
+    )
+
+
+def list_github_repo_clis(spec: str) -> list[str]:
+    parsed = _parse_github_spec(spec)
+    if parsed is None:
+        raise RuntimeError("Unsupported GitHub URL")
+    repo_root, _source = _extract_github_repo(parsed)
+    cleanup_root = os.path.dirname(repo_root)
+    try:
+        return _list_repo_clis(repo_root)
+    finally:
+        shutil.rmtree(cleanup_root, ignore_errors=True)
+
+
+def _build_register_command_from_manifest(cli_dir: str) -> tuple[str, list, dict]:
+    manifest = _load_json_if_exists(os.path.join(cli_dir, "cli.json"))
+    cli_dir_name = os.path.basename(cli_dir)
+    cli_name = str(manifest.get("name") or cli_dir_name).strip()
+    if not cli_name:
+        cli_name = cli_dir_name
+
+    binary = str(manifest.get("binary") or cli_name).strip()
+    install_command = str(manifest.get("install") or "").strip()
+    description = str(manifest.get("description") or "").strip()
+
+    command = ["opencli", "external", "register", cli_name]
+    if binary and binary != cli_name:
+        command.extend(["--binary", binary])
+    if install_command:
+        command.extend(["--install", install_command])
+    if description:
+        command.extend(["--desc", description])
+
+    metadata = {
+        "name": cli_name,
+        "binary": binary,
+        "install": install_command,
+        "description": description,
+        "homepage": str(manifest.get("homepage") or "").strip(),
+        "tags": manifest.get("tags") or [],
+    }
+    return cli_name, command, metadata
+
+
+def install_github_clis(spec: str, selected_clis: list[str] | None = None) -> list[dict]:
+    parsed = _parse_github_spec(spec)
+    if parsed is None:
+        raise RuntimeError("Unsupported GitHub URL")
+
+    repo_root, source = _extract_github_repo(parsed)
+    cleanup_root = os.path.dirname(repo_root)
+    try:
+        available_clis = _list_repo_clis(repo_root)
+        if not available_clis:
+            raise RuntimeError("GitHub repository clis directory is empty")
+
+        if selected_clis:
+            unknown = [name for name in selected_clis if name not in available_clis]
+            if unknown:
+                available = ", ".join(available_clis)
+                missing = ", ".join(unknown)
+                raise RuntimeError(
+                    f"CLI '{missing}' not found in repository clis directory. "
+                    f"Available CLIs: {available}"
+                )
+            targets = selected_clis
+        else:
+            targets = available_clis
+
+        installed = []
+        clis_root = os.path.join(repo_root, "clis")
+        os.makedirs(CLIS_DIR, exist_ok=True)
+        for dir_name in targets:
+            cli_dir = os.path.join(clis_root, dir_name)
+            cli_name, command, metadata = _build_register_command_from_manifest(cli_dir)
+            result = run_manager_command(command)
+            if result["returncode"] != 0:
+                message = result["stderr"] or result["stdout"] or "opencli register failed"
+                raise RuntimeError(message)
+
+            meta_dir = os.path.join(CLIS_DIR, cli_name)
+            os.makedirs(meta_dir, exist_ok=True)
+            with open(_cli_meta_path(cli_name), "w", encoding="utf-8") as handle:
+                json.dump(
+                    {
+                        **metadata,
+                        "source": {
+                            **source,
+                            "cli": dir_name,
+                        },
+                    },
+                    handle,
+                    ensure_ascii=False,
+                    indent=2,
+                )
+            installed.append(metadata)
+        return installed
+    finally:
+        shutil.rmtree(cleanup_root, ignore_errors=True)
 
 
 def detect_install_method() -> str:
@@ -185,6 +429,14 @@ def build_cli_exec_command(cli_name: str, args: list | None = None) -> list:
 
 def build_external_cli_install_command(cli_name: str) -> list:
     return ["opencli", "external", "install", cli_name]
+
+
+def build_external_cli_update_command(cli_name: str) -> list:
+    return ["opencli", "external", "update", cli_name]
+
+
+def build_external_cli_uninstall_command(cli_name: str) -> list:
+    return ["opencli", "external", "uninstall", cli_name]
 
 
 def run_passthrough_command(command: list) -> int:
