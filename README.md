@@ -185,6 +185,7 @@ advai tui --timeout 180
 | `ADVAI_API_KEY` | Yes* | none | API key for the AI backend |
 | `ADVAI_BASE_URL` | No | `https://api.openai.com/v1` | Base URL for an OpenAI-compatible API |
 | `ADVAI_MODEL` | No | `gpt-4o-mini` | Default model used by `advai tui` |
+| `ADVAI_MODELS` | No | built-in model list | Comma-separated models shown by the interactive `/model` picker |
 | `ADVAI_SYSTEM_PROMPT` | No | built-in prompt | Initial system prompt |
 | `ADVAI_TIMEOUT` | No | `120` | Request timeout in seconds |
 | `OPENAI_API_KEY` | Yes* | none | Fallback if `ADVAI_API_KEY` is not set |
@@ -198,11 +199,14 @@ advai tui --timeout 180
 ```bash
 /help
 /clear
+/model
 /model gpt-4o-mini
 /system You are a helpful assistant.
 /save ./chat.md
 /exit
 ```
+
+Run `/model` with no arguments to open an interactive model picker. Use the up and down arrow keys to choose a model, then press Enter to confirm.
 
 ## Skills
 

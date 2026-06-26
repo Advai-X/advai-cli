@@ -1,16 +1,25 @@
 from __future__ import annotations
 
 import os
+import select
 import shutil
+import sys
+import termios
 import textwrap
+import tty
 from datetime import datetime
 
 import click
 
 from advai import __version__
-from advai.ai_client import AIClientError, AIConfig, request_chat_completion
+from advai.ai_client import (
+    AIClientError,
+    AIConfig,
+    list_selectable_models,
+    request_chat_completion,
+)
 
-HELP_TEXT = "Commands: /help /clear /model <name> /system <prompt> /save <path> /exit"
+HELP_TEXT = "Commands: /help /clear /model [name] /system <prompt> /save <path> /exit"
 WELCOME_BANNER_ADVAI = (
     " █████╗ ██████╗ ██╗   ██╗ █████╗ ██╗      ██████╗██╗     ██╗",
     "██╔══██╗██╔══██╗██║   ██║██╔══██╗██║     ██╔════╝██║     ██║",
@@ -86,6 +95,88 @@ def _render_welcome_banner() -> None:
     click.echo()
 
 
+def _classify_picker_sequence(sequence: bytes) -> str:
+    if sequence == b"\x03":
+        return "interrupt"
+    if sequence in {b"\r", b"\n"}:
+        return "enter"
+    if sequence == b"\x1b[A":
+        return "up"
+    if sequence == b"\x1b[B":
+        return "down"
+    if sequence.startswith(b"\x1b"):
+        return "escape"
+    return sequence.decode("utf-8", errors="ignore")
+
+
+def _read_picker_key() -> str:
+    fd = sys.stdin.fileno()
+    previous = termios.tcgetattr(fd)
+    try:
+        tty.setraw(fd)
+        sequence = os.read(fd, 1)
+        key = _classify_picker_sequence(sequence)
+        if key == "interrupt":
+            raise KeyboardInterrupt
+        if key != "escape":
+            return key
+
+        while len(sequence) < 3:
+            ready, _, _ = select.select([fd], [], [], 0.15)
+            if not ready:
+                break
+            sequence += os.read(fd, 1)
+            key = _classify_picker_sequence(sequence)
+            if key in {"up", "down"}:
+                return key
+
+        key = _classify_picker_sequence(sequence)
+        if key == "interrupt":
+            raise KeyboardInterrupt
+        return key
+    finally:
+        termios.tcsetattr(fd, termios.TCSADRAIN, previous)
+
+
+def _render_model_picker(models: list[str], selected_index: int, current_model: str) -> None:
+    click.clear()
+    click.echo()
+    click.secho("Select a model", bold=True)
+    click.echo("Use ↑/↓ to move, Enter to confirm, Esc to cancel.")
+    click.echo()
+    for index, model_name in enumerate(models):
+        pointer = ">" if index == selected_index else " "
+        suffix = " (current)" if model_name == current_model else ""
+        if index == selected_index:
+            click.secho(f"{pointer} {model_name}{suffix}", fg="green", bold=True)
+        else:
+            click.echo(f"{pointer} {model_name}{suffix}")
+    click.echo()
+
+
+def _select_model(current_model: str) -> str | None:
+    models = list_selectable_models(current_model)
+    selected_index = models.index(current_model) if current_model in models else 0
+
+    while True:
+        _render_model_picker(models, selected_index, current_model)
+        try:
+            key = _read_picker_key()
+        except KeyboardInterrupt:
+            return None
+
+        if key == "up":
+            selected_index = (selected_index - 1) % len(models)
+            continue
+        if key == "down":
+            selected_index = (selected_index + 1) % len(models)
+            continue
+        if key == "enter":
+            return models[selected_index]
+        if key == "escape":
+            return None
+
+
 def _render_screen(config: AIConfig, history: list[dict], status: str, clear_screen: bool) -> None:
     if clear_screen:
         click.clear()
@@ -152,7 +243,11 @@ def _handle_command(raw_value: str, history: list[dict], config: AIConfig) -> tu
         return True, "Conversation cleared."
     if command == "model":
         if not argument:
-            return True, "Usage: /model <name>"
+            selected_model = _select_model(config.model)
+            if not selected_model:
+                return True, f"Model selection cancelled. Current model: {config.model}"
+            config.model = selected_model
+            return True, f"Model switched to {config.model}"
         config.model = argument
         return True, f"Model switched to {config.model}"
     if command == "system":

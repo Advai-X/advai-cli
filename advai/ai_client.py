@@ -8,6 +8,13 @@ from dataclasses import dataclass
 
 DEFAULT_BASE_URL = "https://api.openai.com/v1"
 DEFAULT_MODEL = "gpt-4o-mini"
+DEFAULT_TUI_MODELS = (
+    "gpt-4o-mini",
+    "gpt-4o",
+    "gpt-4.1-mini",
+    "gpt-4.1",
+    "o4-mini",
+)
 DEFAULT_SYSTEM_PROMPT = "You are a helpful AI assistant in a terminal session."
 DEFAULT_TIMEOUT = 120
 
@@ -27,6 +34,18 @@ class AIConfig:
     @property
     def chat_completions_url(self) -> str:
         return f"{self.base_url.rstrip('/')}/chat/completions"
+
+
+def _dedupe_preserve_order(items: list[str]) -> list[str]:
+    seen = set()
+    ordered = []
+    for item in items:
+        value = str(item or "").strip()
+        if not value or value in seen:
+            continue
+        seen.add(value)
+        ordered.append(value)
+    return ordered
 
 
 def _parse_timeout(value: str | None) -> int:
@@ -73,6 +92,15 @@ def load_ai_config(
         system_prompt=resolved_system_prompt,
         timeout=resolved_timeout,
     )
+
+
+def list_selectable_models(current_model: str | None = None) -> list[str]:
+    raw_models = os.getenv("ADVAI_MODELS", "")
+    configured_models = [item.strip() for item in raw_models.split(",") if item.strip()]
+    base_models = configured_models or list(DEFAULT_TUI_MODELS)
+    if current_model:
+        return _dedupe_preserve_order([current_model, *base_models])
+    return _dedupe_preserve_order(base_models)
 
 
 def _build_messages(history: list[dict], system_prompt: str) -> list[dict]:
