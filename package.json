@@ -11,7 +11,7 @@
     "url": "https://github.com/Advai-X/advai-cli/issues"
   },
   "bin": {
-    "advai": "./bin/advai.js"
+    "advai": "bin/advai.js"
   },
   "scripts": {
     "postinstall": "node ./bin/install-python.js"
