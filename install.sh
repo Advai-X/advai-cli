@@ -88,4 +88,4 @@ esac
 
 log "Installation complete! Try:"
 log "  advai --help"
-log "  advai install <skill-name>"
+log "  advai skill install https://github.com/your-org/skill-repo --skill <skill-name>"

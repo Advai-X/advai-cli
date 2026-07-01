@@ -11,6 +11,14 @@ from advai.kb import (
     search_knowledge_base,
     sync_knowledge_base,
 )
+from advai.skill_platforms import (
+    add_custom_platform,
+    clear_platform_override,
+    list_skill_platforms,
+    remove_custom_platform,
+    resolve_platform_target,
+    set_platform_override,
+)
 from advai.cli_manager import (
     cli_info,
     install_github_clis,
@@ -21,7 +29,6 @@ from advai.cli_manager import (
     get_external_cli_info,
     cli_exists,
     build_cli_exec_command,
-    build_external_cli_install_command,
     build_external_cli_uninstall_command,
     build_external_cli_update_command,
     opencli_available,
@@ -34,8 +41,11 @@ from advai.skills import (
     install_github_skills,
     install_skill,
     list_github_repo_skills,
+    list_skill_sync_targets,
     list_skills,
+    sync_skill_to_platform,
     uninstall_skill,
+    unsync_skill_from_platform,
     update_skill,
 )
 from advai.tui import run_tui
@@ -136,8 +146,34 @@ def _summarize_opencli_error(exc: Exception) -> str:
     return re.sub(r"\s+", " ", lines[-1])
 
 
-def _skill_install(skill_name, force, selected_skill=None):
+def _sync_installed_skill_targets(skill_name, platforms, sync_mode, project_dir, force):
+    synced = []
+    for platform in platforms:
+        synced.append(
+            sync_skill_to_platform(
+                skill_name,
+                platform,
+                project_dir=project_dir,
+                mode=sync_mode,
+                force=force,
+            )
+        )
+    return synced
+
+
+def _skill_install(
+    skill_name,
+    force,
+    selected_skill=None,
+    platforms=(),
+    sync_mode="symlink",
+    project_dir=None,
+):
     try:
+        if not skill_name.startswith("https://github.com/"):
+            raise click.ClickException(
+                "skill install currently only supports GitHub repository URLs"
+            )
         if skill_name.startswith("https://github.com/") and not selected_skill:
             available_skills = list_github_repo_skills(skill_name)
             if len(available_skills) > 1:
@@ -154,13 +190,28 @@ def _skill_install(skill_name, force, selected_skill=None):
 
                 installed = install_github_skills(skill_name, force=force)
                 for metadata in installed:
+                    installed_name = metadata.get("name", "unknown")
+                    _sync_installed_skill_targets(
+                        installed_name,
+                        platforms,
+                        sync_mode,
+                        project_dir,
+                        force=force,
+                    )
                     click.echo(
-                        f"✅ Skill '{metadata.get('name', 'unknown')}' installed successfully"
+                        f"✅ Skill '{installed_name}' installed successfully"
                     )
                 return
 
         metadata = install_skill(skill_name, force=force, selected_skill=selected_skill)
         installed_name = metadata.get("name", skill_name)
+        _sync_installed_skill_targets(
+            installed_name,
+            platforms,
+            sync_mode,
+            project_dir,
+            force=force,
+        )
         click.echo(f"✅ Skill '{installed_name}' installed successfully")
     except FileExistsError:
         click.echo(f"⚠️  Skill '{skill_name}' already exists, use --force to overwrite")
@@ -171,8 +222,14 @@ def _skill_install(skill_name, force, selected_skill=None):
 
 def _skill_uninstall(skill_name):
     try:
+        sync_targets = list_skill_sync_targets(skill_name)
         uninstall_skill(skill_name)
-        click.echo(f"🗑️  Skill '{skill_name}' uninstalled")
+        if sync_targets:
+            click.echo(
+                f"🗑️  Skill '{skill_name}' uninstalled and removed {len(sync_targets)} synced target(s)"
+            )
+        else:
+            click.echo(f"🗑️  Skill '{skill_name}' uninstalled")
     except FileNotFoundError:
         click.echo(f"⚠️  Skill '{skill_name}' is not installed")
     except Exception as e:
@@ -210,7 +267,135 @@ def _skill_info(skill_name):
         return
     click.echo(f"ℹ️  Skill '{skill_name}':")
     for k, v in data.items():
+        if k == "sync_targets":
+            continue
         click.echo(f"  {k}: {v}")
+    sync_targets = data.get("sync_targets") or []
+    if not sync_targets:
+        click.echo("  sync_targets: []")
+        return
+    click.echo("  sync_targets:")
+    for target in sync_targets:
+        project_dir = target.get("project_dir") or "-"
+        click.echo(
+            f"    - {target.get('platform')} | {target.get('mode')} | {target.get('path')} | project_dir={project_dir}"
+        )
+
+
+def _skill_sync(skill_name, platforms, sync_mode, project_dir, force):
+    try:
+        for platform in platforms:
+            result = sync_skill_to_platform(
+                skill_name,
+                platform,
+                project_dir=project_dir,
+                mode=sync_mode,
+                force=force,
+            )
+            click.echo(
+                f"🔗 Skill '{skill_name}' synced to {result['platform']['display_name']} at {result['path']}"
+            )
+    except FileNotFoundError:
+        click.echo(f"⚠️  Skill '{skill_name}' is not installed")
+        sys.exit(1)
+    except Exception as e:
+        click.echo(f"❌ Sync failed: {e}", err=True)
+        sys.exit(1)
+
+
+def _skill_unsync(skill_name, platforms, project_dir):
+    try:
+        for platform in platforms:
+            result = unsync_skill_from_platform(
+                skill_name,
+                platform,
+                project_dir=project_dir,
+            )
+            click.echo(
+                f"🧹 Skill '{skill_name}' removed from {result['platform']['display_name']}"
+            )
+    except FileNotFoundError as e:
+        click.echo(f"⚠️  {e}", err=True)
+        sys.exit(1)
+    except Exception as e:
+        click.echo(f"❌ Unsync failed: {e}", err=True)
+        sys.exit(1)
+
+
+def _skill_platform_list(project_dir):
+    platforms = list_skill_platforms()
+    if not platforms:
+        click.echo("(no skill platforms configured)")
+        return
+    click.echo("Skill platforms:")
+    for platform in platforms:
+        target = resolve_platform_target(platform["key"], project_dir=project_dir)
+        scope = "project" if target.get("project_dir") else "global"
+        custom = "custom" if platform.get("is_custom") else "built-in"
+        click.echo(
+            f"  • {platform['display_name']} [{platform['key']}] ({platform['category']}, {custom}, {scope})"
+        )
+        click.echo(f"    skills_dir: {target['skills_dir']}")
+        if platform.get("project_relative_skills_dir"):
+            click.echo(
+                f"    project_relative_skills_dir: {platform['project_relative_skills_dir']}"
+            )
+
+
+def _skill_platform_add(key, display_name, skills_dir, category, project_relative_skills_dir):
+    try:
+        platform = add_custom_platform(
+            key,
+            display_name,
+            skills_dir,
+            category=category,
+            project_relative_skills_dir=project_relative_skills_dir,
+        )
+        click.echo(
+            f"✅ Added custom platform '{platform['display_name']}' [{platform['key']}]"
+        )
+    except Exception as e:
+        click.echo(f"❌ Adding platform failed: {e}", err=True)
+        sys.exit(1)
+
+
+def _skill_platform_remove(key):
+    try:
+        remove_custom_platform(key)
+        click.echo(f"🗑️  Removed custom platform '{key}'")
+    except Exception as e:
+        click.echo(f"❌ Removing platform failed: {e}", err=True)
+        sys.exit(1)
+
+
+def _skill_platform_override(key, skills_dir, project_relative_skills_dir):
+    try:
+        platform = set_platform_override(
+            key,
+            skills_dir=skills_dir,
+            project_relative_skills_dir=project_relative_skills_dir,
+        )
+        click.echo(
+            f"✅ Updated platform '{platform['display_name']}' [{platform['key']}]"
+        )
+    except Exception as e:
+        click.echo(f"❌ Updating platform override failed: {e}", err=True)
+        sys.exit(1)
+
+
+def _skill_platform_clear_override(key, clear_path, clear_project_path):
+    try:
+        platform = clear_platform_override(
+            key,
+            clear_skills_dir=clear_path,
+            clear_project_relative_skills_dir=clear_project_path,
+        )
+        click.echo(
+            f"✅ Cleared overrides for platform '{platform['display_name']}' [{platform['key']}]"
+        )
+    except Exception as e:
+        click.echo(f"❌ Clearing platform override failed: {e}", err=True)
+        sys.exit(1)
 
 
 def _self_info():
@@ -272,9 +457,35 @@ def skill_admin():
 @click.argument("skill_name")
 @click.option("--force", is_flag=True, help="Force reinstall (overwrite existing)")
 @click.option("--skill", "selected_skill", default=None, help="Select one skill from a GitHub repo's skills directory")
-def skill_install_cmd(skill_name, force, selected_skill):
+@click.option(
+    "--platform",
+    "platforms",
+    multiple=True,
+    help="Sync the installed skill to one or more target platforms",
+)
+@click.option(
+    "--sync-mode",
+    type=click.Choice(["symlink", "copy"], case_sensitive=False),
+    default="symlink",
+    show_default=True,
+    help="How synced skills are written to platform directories",
+)
+@click.option(
+    "--project-dir",
+    type=click.Path(path_type=str),
+    default=None,
+    help="Use a project-local platform skills path when the platform supports it",
+)
+def skill_install_cmd(skill_name, force, selected_skill, platforms, sync_mode, project_dir):
     """Install a Skill."""
-    _skill_install(skill_name, force, selected_skill=selected_skill)
+    _skill_install(
+        skill_name,
+        force,
+        selected_skill=selected_skill,
+        platforms=platforms,
+        sync_mode=sync_mode.lower(),
+        project_dir=project_dir,
+    )
 
 
 @skill_admin.command(name="uninstall")
@@ -303,6 +514,137 @@ def skill_update_cmd(skill_name, selected_skill):
 def skill_info_cmd(skill_name):
     """Show Skill details."""
     _skill_info(skill_name)
+
+
+@skill_admin.command(name="sync")
+@click.argument("skill_name")
+@click.option(
+    "--platform",
+    "platforms",
+    multiple=True,
+    required=True,
+    help="Target platform key, repeat for multiple platforms",
+)
+@click.option(
+    "--sync-mode",
+    type=click.Choice(["symlink", "copy"], case_sensitive=False),
+    default="symlink",
+    show_default=True,
+    help="How synced skills are written to platform directories",
+)
+@click.option(
+    "--project-dir",
+    type=click.Path(path_type=str),
+    default=None,
+    help="Use a project-local platform skills path when the platform supports it",
+)
+@click.option("--force", is_flag=True, help="Overwrite an existing target path")
+def skill_sync_cmd(skill_name, platforms, sync_mode, project_dir, force):
+    """Sync a locally installed skill to one or more platforms."""
+    _skill_sync(skill_name, platforms, sync_mode.lower(), project_dir, force)
+
+
+@skill_admin.command(name="unsync")
+@click.argument("skill_name")
+@click.option(
+    "--platform",
+    "platforms",
+    multiple=True,
+    required=True,
+    help="Target platform key, repeat for multiple platforms",
+)
+@click.option(
+    "--project-dir",
+    type=click.Path(path_type=str),
+    default=None,
+    help="Remove the project-local sync target for a platform",
+)
+def skill_unsync_cmd(skill_name, platforms, project_dir):
+    """Remove synced platform targets for a skill."""
+    _skill_unsync(skill_name, platforms, project_dir)
+
+
+@skill_admin.group(name="platform")
+def skill_platform_admin():
+    """Manage skill platforms and path overrides."""
+
+
+@skill_platform_admin.command(name="list")
+@click.option(
+    "--project-dir",
+    type=click.Path(path_type=str),
+    default=None,
+    help="Resolve platform paths for a specific project directory when supported",
+)
+def skill_platform_list_cmd(project_dir):
+    """List supported skill platforms."""
+    _skill_platform_list(project_dir)
+
+
+@skill_platform_admin.command(name="add")
+@click.argument("key")
+@click.option("--name", "display_name", required=True, help="Platform display name")
+@click.option("--path", "skills_dir", required=True, help="Global skills directory path")
+@click.option(
+    "--category",
+    type=click.Choice(["coding", "lobster", "custom"], case_sensitive=False),
+    default="custom",
+    show_default=True,
+    help="Platform category label",
+)
+@click.option(
+    "--project-path",
+    "project_relative_skills_dir",
+    default=None,
+    help="Optional project-relative skills directory",
+)
+def skill_platform_add_cmd(key, display_name, skills_dir, category, project_relative_skills_dir):
+    """Add a custom skill platform."""
+    _skill_platform_add(
+        key,
+        display_name,
+        skills_dir,
+        category.lower(),
+        project_relative_skills_dir,
+    )
+
+
+@skill_platform_admin.command(name="remove")
+@click.argument("key")
+def skill_platform_remove_cmd(key):
+    """Remove a custom skill platform."""
+    _skill_platform_remove(key)
+
+
+@skill_platform_admin.command(name="override")
+@click.argument("key")
+@click.option("--path", "skills_dir", default=None, help="Override the global skills directory")
+@click.option(
+    "--project-path",
+    "project_relative_skills_dir",
+    default=None,
+    help="Override the project-relative skills directory",
+)
+def skill_platform_override_cmd(key, skills_dir, project_relative_skills_dir):
+    """Override a built-in or custom platform path."""
+    _skill_platform_override(key, skills_dir, project_relative_skills_dir)
+
+
+@skill_platform_admin.command(name="clear-override")
+@click.argument("key")
+@click.option(
+    "--keep-path",
+    is_flag=True,
+    help="Do not clear the global skills directory override",
+)
+@click.option(
+    "--keep-project-path",
+    is_flag=True,
+    help="Do not clear the project-relative skills directory override",
+)
+def skill_platform_clear_override_cmd(key, keep_path, keep_project_path):
+    """Clear built-in platform path overrides."""
+    _skill_platform_clear_override(key, not keep_path, not keep_project_path)
 
 
 @cli.group(name="kb")
@@ -450,54 +792,46 @@ def _execute_cli_command(command, action):
 
 @cli_admin.command(name="install")
 @click.argument("cli_name")
-@click.option("--yes", is_flag=True, help="Skip confirmation prompt")
 @click.option("--cli", "selected_cli", default=None, help="Select one CLI from a GitHub repo's clis directory")
-def cli_install_cmd(cli_name, yes, selected_cli):
+def cli_install_cmd(cli_name, selected_cli):
     """Install an external CLI."""
-    if looks_like_github_url(cli_name):
-        if not opencli_available():
-            raise click.ClickException("opencli is not installed or not on PATH")
-        try:
-            if selected_cli:
-                installed = install_github_clis(cli_name, selected_clis=[selected_cli])
-                for item in installed:
-                    click.echo(f"CLI '{item['name']}' install completed")
-                return
+    if not looks_like_github_url(cli_name):
+        raise click.ClickException(
+            "cli install currently only supports GitHub repository URLs"
+        )
 
-            available_clis = list_github_repo_clis(cli_name)
-            if len(available_clis) > 1:
-                click.echo("Repository CLIs:")
-                for name in available_clis:
-                    click.echo(f"  - {name}")
-                confirmed = click.confirm(
-                    "Multiple CLIs found. Install all of them?",
-                    default=False,
-                )
-                if not confirmed:
-                    click.echo("Installation cancelled.")
-                    return
-                installed = install_github_clis(cli_name)
-                for item in installed:
-                    click.echo(f"CLI '{item['name']}' install completed")
-                return
+    if not opencli_available():
+        raise click.ClickException("opencli is not installed or not on PATH")
+    try:
+        if selected_cli:
+            installed = install_github_clis(cli_name, selected_clis=[selected_cli])
+            for item in installed:
+                click.echo(f"CLI '{item['name']}' install completed")
+            return
 
+        available_clis = list_github_repo_clis(cli_name)
+        if len(available_clis) > 1:
+            click.echo("Repository CLIs:")
+            for name in available_clis:
+                click.echo(f"  - {name}")
+            confirmed = click.confirm(
+                "Multiple CLIs found. Install all of them?",
+                default=False,
+            )
+            if not confirmed:
+                click.echo("Installation cancelled.")
+                return
             installed = install_github_clis(cli_name)
             for item in installed:
                 click.echo(f"CLI '{item['name']}' install completed")
             return
-        except RuntimeError as exc:
-            _raise_opencli_error("installing GitHub external CLIs", exc)
 
-    if selected_cli:
-        raise click.ClickException("--cli can only be used with a GitHub repository URL")
-
-    if not opencli_available():
-        raise click.ClickException("opencli is not installed or not on PATH")
-    command = build_external_cli_install_command(cli_name)
-    if not yes:
-        click.confirm(f"Install external CLI '{cli_name}' via: {' '.join(command)} ?", abort=True)
-    _execute_cli_command(command, "install")
-    click.echo(f"CLI '{cli_name}' install completed")
+        installed = install_github_clis(cli_name)
+        for item in installed:
+            click.echo(f"CLI '{item['name']}' install completed")
+        return
+    except RuntimeError as exc:
+        _raise_opencli_error("installing GitHub external CLIs", exc)
 
 
 @cli_admin.command(name="update")

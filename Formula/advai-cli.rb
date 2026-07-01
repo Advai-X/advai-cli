@@ -23,8 +23,8 @@ class AdvaiCli < Formula
     ENV["HOME"] = testpath/"home"
 
     assert_match version.to_s, shell_output("#{bin}/advai --version")
-    system bin/"advai", "skill", "install", "demo-skill"
-    assert_match "demo-skill", shell_output("#{bin}/advai skill list")
-    assert_match "demo-skill", shell_output("#{bin}/advai skill info demo-skill")
+    assert_match "(no Skills installed)", shell_output("#{bin}/advai skill list")
+    assert_match "Skill platforms:", shell_output("#{bin}/advai skill platform list")
+    assert_match "Cursor", shell_output("#{bin}/advai skill platform list")
   end
 end

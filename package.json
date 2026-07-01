@@ -1,6 +1,6 @@
 {
   "name": "advai-cli",
-  "version": "1.0.5",
+  "version": "1.0.6",
   "description": "CLI for managing skills and external CLIs.",
   "homepage": "https://github.com/Advai-X/advai-x-cli",
   "repository": {
@@ -21,6 +21,7 @@
     "advai/ai_client.py",
     "advai/cli.py",
     "advai/cli_manager.py",
+    "advai/skill_platforms.py",
     "advai/skills.py",
     "advai/tui.py",
     "bin/advai.js",

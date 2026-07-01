@@ -9,6 +9,8 @@ import urllib.request
 import zipfile
 from datetime import datetime, timezone
 
+from advai.skill_platforms import get_skill_platform, resolve_platform_target
+
 SKILLS_DIR = os.path.expanduser("~/.advai/skills")
 CONFIG_DIR = os.path.expanduser("~/.advai")
 GITHUB_REPO_PATTERN = re.compile(
@@ -153,24 +155,90 @@ def _write_skill_metadata(skill_name: str, metadata: dict) -> None:
         json.dump(metadata, handle, ensure_ascii=False, indent=2)
 
 
-def _install_placeholder_skill(skill_name: str, force: bool = False) -> dict:
-    path = _skill_path(skill_name)
-    if os.path.exists(path) and not force:
-        raise FileExistsError(skill_name)
+def _load_existing_metadata(skill_name: str) -> dict:
+    return _load_skill_metadata(_meta_path(skill_name))
 
-    os.makedirs(path, exist_ok=True)
-    meta = {
-        "name": skill_name,
-        "version": "0.1.0",
-        "installed_at": _utc_now(),
-        "status": "installed",
-        "source": {
-            "type": "local",
-            "install_spec": skill_name,
-        },
+
+def _preserve_sync_targets(existing_meta: dict, metadata: dict) -> dict:
+    merged = dict(metadata)
+    sync_targets = existing_meta.get("sync_targets")
+    if isinstance(sync_targets, list):
+        merged["sync_targets"] = sync_targets
+    return merged
+
+
+def _sync_key(platform_key: str, project_dir: str | None) -> tuple[str, str | None]:
+    normalized_project_dir = None
+    if project_dir:
+        normalized_project_dir = os.path.abspath(os.path.expanduser(project_dir))
+    return platform_key, normalized_project_dir
+
+
+def _skill_target_entry(
+    platform_key: str,
+    target_path: str,
+    mode: str,
+    project_dir: str | None,
+) -> dict:
+    return {
+        "platform": platform_key,
+        "path": os.path.abspath(target_path),
+        "mode": mode,
+        "project_dir": os.path.abspath(os.path.expanduser(project_dir))
+        if project_dir
+        else None,
+        "synced_at": _utc_now(),
     }
-    _write_skill_metadata(skill_name, meta)
-    return meta
+
+
+def _replace_sync_target_entry(metadata: dict, target_entry: dict) -> dict:
+    targets = []
+    target_key = _sync_key(target_entry["platform"], target_entry.get("project_dir"))
+    for item in metadata.get("sync_targets") or []:
+        item_key = _sync_key(item.get("platform", ""), item.get("project_dir"))
+        if item_key != target_key:
+            targets.append(item)
+    targets.append(target_entry)
+    metadata["sync_targets"] = sorted(
+        targets,
+        key=lambda item: (item.get("platform", ""), item.get("project_dir") or ""),
+    )
+    return metadata
+
+
+def _remove_path(path: str) -> None:
+    if os.path.islink(path) or os.path.isfile(path):
+        os.unlink(path)
+        return
+    if os.path.isdir(path):
+        shutil.rmtree(path)
+
+
+def _create_skill_target(source_path: str, target_path: str, mode: str) -> None:
+    if mode not in {"symlink", "copy"}:
+        raise ValueError("Sync mode must be 'symlink' or 'copy'")
+
+    os.makedirs(os.path.dirname(target_path), exist_ok=True)
+    _remove_path(target_path)
+
+    if mode == "symlink":
+        os.symlink(source_path, target_path)
+        return
+
+    shutil.copytree(source_path, target_path)
+
+
+def _sync_targets_for_skill(skill_name: str) -> list[dict]:
+    metadata = info_skill(skill_name) or {}
+    sync_targets = metadata.get("sync_targets") or []
+    return [item for item in sync_targets if isinstance(item, dict)]
+
+
+def _store_sync_target(skill_name: str, target_entry: dict) -> dict:
+    metadata = info_skill(skill_name) or {}
+    metadata = _replace_sync_target_entry(metadata, target_entry)
+    _write_skill_metadata(skill_name, metadata)
+    return metadata
 
 
 def _list_repo_skills(repo_root: str) -> list[str]:
@@ -223,6 +291,7 @@ def _install_skill_from_directory(
         skill_name = source_skill
 
     target_path = _skill_path(skill_name)
+    existing_meta = _load_existing_metadata(skill_name)
     if os.path.exists(target_path):
         if not force:
             raise FileExistsError(skill_name)
@@ -238,6 +307,7 @@ def _install_skill_from_directory(
         **source,
         "skill": source_skill,
     }
+    merged_meta = _preserve_sync_targets(existing_meta, merged_meta)
     _write_skill_metadata(skill_name, merged_meta)
     return merged_meta
 
@@ -325,18 +395,17 @@ def _install_github_skill(
 
 
 def install_skill(skill_name: str, force: bool = False, selected_skill: str | None = None) -> dict:
-    """Install a local placeholder skill or fetch one from a GitHub repository URL."""
-    if _looks_like_github_url(skill_name):
-        return _install_github_skill(skill_name, force=force, selected_skill=selected_skill)
-    if selected_skill:
-        raise RuntimeError("--skill can only be used with a GitHub repository URL")
-    return _install_placeholder_skill(skill_name, force=force)
+    """Install a skill from a GitHub repository URL."""
+    if not _looks_like_github_url(skill_name):
+        raise RuntimeError("skill install currently only supports GitHub repository URLs")
+    return _install_github_skill(skill_name, force=force, selected_skill=selected_skill)
 
 
 def uninstall_skill(skill_name: str) -> None:
     path = _skill_path(skill_name)
     if not os.path.exists(path):
         raise FileNotFoundError(skill_name)
+    remove_all_skill_targets(skill_name)
     shutil.rmtree(path)
 
 
@@ -372,10 +441,133 @@ def update_skill(skill_name=None, selected_skill: str | None = None):
                 force=True,
                 selected_skill=selected_skill or source_skill,
             )
+            resync_skill_targets(meta["name"])
             updated.append(meta["name"])
         except Exception:
             continue
     return updated
+
+
+def sync_skill_to_platform(
+    skill_name: str,
+    platform_key: str,
+    project_dir: str | None = None,
+    mode: str = "symlink",
+    force: bool = False,
+) -> dict:
+    source_path = _skill_path(skill_name)
+    if not os.path.isdir(source_path):
+        raise FileNotFoundError(skill_name)
+
+    target = resolve_platform_target(platform_key, project_dir=project_dir)
+    target_path = os.path.join(target["skills_dir"], skill_name)
+    if os.path.exists(target_path) and not force:
+        same_symlink = (
+            mode == "symlink"
+            and os.path.islink(target_path)
+            and os.path.realpath(target_path) == os.path.realpath(source_path)
+        )
+        if not same_symlink:
+            raise FileExistsError(target_path)
+
+    _create_skill_target(source_path, target_path, mode)
+    metadata = _store_sync_target(
+        skill_name,
+        _skill_target_entry(
+            platform_key=target["platform"]["key"],
+            target_path=target_path,
+            mode=mode,
+            project_dir=target["project_dir"],
+        ),
+    )
+    return {
+        "skill": skill_name,
+        "platform": target["platform"],
+        "path": target_path,
+        "mode": mode,
+        "metadata": metadata,
+    }
+
+
+def unsync_skill_from_platform(skill_name: str, platform_key: str, project_dir: str | None = None) -> dict:
+    metadata = info_skill(skill_name)
+    if metadata is None:
+        raise FileNotFoundError(skill_name)
+
+    normalized_key = get_skill_platform(platform_key)
+    if normalized_key is None:
+        raise KeyError(f"Unknown platform '{platform_key}'")
+
+    match_key = _sync_key(normalized_key["key"], project_dir)
+    kept_targets = []
+    removed_targets = []
+    for item in metadata.get("sync_targets") or []:
+        item_key = _sync_key(item.get("platform", ""), item.get("project_dir"))
+        if item_key == match_key:
+            removed_targets.append(item)
+        else:
+            kept_targets.append(item)
+
+    if not removed_targets:
+        raise FileNotFoundError(
+            f"Skill '{skill_name}' is not synced to platform '{normalized_key['key']}'"
+        )
+
+    for item in removed_targets:
+        path = item.get("path")
+        if path and os.path.exists(path):
+            _remove_path(path)
+
+    metadata["sync_targets"] = kept_targets
+    _write_skill_metadata(skill_name, metadata)
+    return {
+        "skill": skill_name,
+        "platform": normalized_key,
+        "removed": removed_targets,
+    }
+
+
+def remove_all_skill_targets(skill_name: str) -> list[dict]:
+    metadata = info_skill(skill_name)
+    if metadata is None:
+        return []
+
+    removed = []
+    for item in metadata.get("sync_targets") or []:
+        path = item.get("path")
+        if path and os.path.exists(path):
+            _remove_path(path)
+        removed.append(item)
+
+    if removed:
+        metadata["sync_targets"] = []
+        _write_skill_metadata(skill_name, metadata)
+    return removed
+
+
+def resync_skill_targets(skill_name: str) -> list[dict]:
+    if not os.path.isdir(_skill_path(skill_name)):
+        return []
+
+    synced = []
+    for item in _sync_targets_for_skill(skill_name):
+        synced.append(
+            sync_skill_to_platform(
+                skill_name,
+                item["platform"],
+                project_dir=item.get("project_dir"),
+                mode=item.get("mode") or "symlink",
+                force=True,
+            )
+        )
+    return synced
+
+
+def list_skill_sync_targets(skill_name: str) -> list[dict]:
+    metadata = info_skill(skill_name)
+    if metadata is None:
+        raise FileNotFoundError(skill_name)
+    return _sync_targets_for_skill(skill_name)
 
 
 def info_skill(skill_name: str):
@@ -384,6 +576,8 @@ def info_skill(skill_name: str):
         sp = _skill_path(skill_name)
         if not os.path.isdir(sp):
             return None
-        return {"status": "installed", "version": "unknown"}
+        return {"status": "installed", "version": "unknown", "sync_targets": []}
     with open(mp, "r", encoding="utf-8") as f:
-        return json.load(f)
+        data = json.load(f)
+    data.setdefault("sync_targets", [])
+    return data

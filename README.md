@@ -43,6 +43,7 @@ It is designed as a lightweight Python-first core with npm and Homebrew distribu
 
 - Inspect the current installation, runtime, and recommended update command with `advai info` and `advai update`
 - Manage locally installed skills with install, list, info, update, and uninstall commands
+- Sync installed skills into platform-specific agent directories such as Cursor, Claude Code, Codex, TRAE, and more
 - Discover and install supported third-party CLIs through the OpenCLI ecosystem
 - Create local knowledge bases, add documents, search content, and resync from source files
 - Proxy supported external CLIs through `advai cli <name> ...`
@@ -155,13 +156,18 @@ advai tui
 | `advai tui` | Start the terminal AI chat interface |
 | `advai skill list` | List locally installed skills |
 | `advai skill info <name>` | Show local metadata for a skill |
-| `advai skill install <name>` | Install a local skill entry |
 | `advai skill install <github-url> [--skill <name>]` | Install skill definitions from a GitHub repo |
+| `advai skill install <github-url> --platform <key>` | Install and sync a skill to one or more target platforms |
 | `advai skill update [name]` | Refresh one or all installed skills |
 | `advai skill uninstall <name>` | Remove an installed skill |
+| `advai skill sync <name> --platform <key>` | Sync an installed skill into one or more platform skills directories |
+| `advai skill unsync <name> --platform <key>` | Remove synced platform targets for a skill |
+| `advai skill platform list` | List built-in and custom skill platforms |
+| `advai skill platform add <key> --name <name> --path <dir>` | Register a custom skill platform |
+| `advai skill platform override <key> --path <dir>` | Override a platform skills directory |
+| `advai skill platform clear-override <key>` | Reset platform path overrides |
 | `advai cli list` | List installable external CLIs from OpenCLI |
 | `advai cli info <name>` | Show details for an external CLI |
-| `advai cli install <name> --yes` | Install an external CLI without confirmation |
 | `advai cli install <github-url> [--cli <name>]` | Register external CLI definitions from a GitHub repo |
 | `advai cli update <name> --yes` | Update an external CLI without confirmation |
 | `advai cli uninstall <name> --yes` | Uninstall an external CLI without confirmation |
@@ -229,21 +235,102 @@ Skills are stored locally under `~/.advai/skills`.
 
 ```bash
 advai skill list
+advai skill platform list
 advai skill info demo-skill
-advai skill install demo-skill
 advai skill install https://github.com/your-org/skill-repo
 advai skill install https://github.com/your-org/skill-repo --skill demo-skill
+advai skill install https://github.com/your-org/skill-repo --skill demo-skill --platform cursor
+advai skill sync demo-skill --platform trae
+advai skill sync demo-skill --platform omp_agent --project-dir /path/to/repo
+advai skill unsync demo-skill --platform cursor
+advai skill platform add custom_agent --name "Custom Agent" --path ~/.custom-agent/skills
+advai skill platform override cursor --path ~/.cursor/skills
 advai skill update demo-skill
 advai skill uninstall demo-skill
 ```
 
+### Supported platforms
+
+`advai skill sync --platform <key>` currently includes `51` built-in platform adapters, plus custom platform support through `advai skill platform add`.
+
+#### Coding platforms
+
+| Key | Platform |
+| --- | --- |
+| `adal` | AdaL |
+| `amp` | Amp |
+| `antigravity` | Antigravity |
+| `augment` | Augment |
+| `bob` | IBM Bob |
+| `claude_code` | Claude Code |
+| `cline` | Cline |
+| `codebuddy` | CodeBuddy |
+| `codex` | Codex |
+| `command_code` | Command Code |
+| `continue` | Continue |
+| `cortex` | Cortex Code |
+| `crush` | Crush |
+| `cursor` | Cursor |
+| `deepagents` | Deep Agents |
+| `droid` | Droid |
+| `firebender` | Firebender |
+| `gemini_cli` | Gemini CLI |
+| `github_copilot` | GitHub Copilot |
+| `goose` | Goose |
+| `grok` | Grok |
+| `iflow` | iFlow CLI |
+| `junie` | Junie |
+| `kilo_code` | Kilo Code |
+| `kimi` | Kimi Code CLI |
+| `kiro` | Kiro CLI |
+| `kode` | Kode |
+| `mcpjam` | MCPJam |
+| `mistral_vibe` | Mistral Vibe |
+| `mux` | Mux |
+| `neovate` | Neovate |
+| `omp_agent` | OMP Agent |
+| `openhands` | OpenHands |
+| `opencode` | OpenCode |
+| `pi` | Pi |
+| `pochi` | Pochi |
+| `qoder` | Qoder |
+| `qwen_code` | Qwen Code |
+| `replit` | Replit |
+| `roo_code` | Roo Code |
+| `trae` | TRAE IDE |
+| `trae_cn` | TRAE CN |
+| `warp` | Warp |
+| `windsurf` | Windsurf |
+| `zencoder` | Zencoder |
+
+#### Lobster platforms
+
+| Key | Platform |
+| --- | --- |
+| `autoclaw` | AutoClaw |
+| `easyclaw` | EasyClaw |
+| `hermes` | Hermes Agent |
+| `openclaw` | OpenClaw |
+| `qclaw` | QClaw |
+| `workbuddy` | WorkBuddy |
+
+#### Custom platforms
+
+- Use `advai skill platform add <key> --name <name> --path <dir>` to register any additional agent or internal platform that stores skills on disk.
+- Use `advai skill platform override <key> --path <dir>` or `--project-path <dir>` to adapt built-in platform paths to your local setup.
+
 Current scope:
 
-- Plain skill names still create a lightweight local placeholder skill
 - GitHub installs read from the repository root `skills/` directory instead of copying the whole repo
 - If the repo `skills/` directory contains one skill, `advai` installs it automatically
 - If the repo `skills/` directory contains multiple skills, `advai` prompts whether to install all of them; use `--skill <name>` to choose one explicitly
 - `advai skill update <name>` reuses the saved GitHub repo URL and selected skill directory when the installed skill came from GitHub
+- `advai skill install` and `advai cli install` currently support GitHub repository URLs only
+- Built-in platform adapters cover common coding and lobster-style agents, and custom platforms can be added locally
+- `advai skill sync` supports `symlink` and `copy` modes for writing skills into platform-specific directories
+- `advai skill install <github-url> --platform <key>` installs locally first, then syncs into each selected platform
+- `advai skill uninstall <name>` removes the local skill and cleans up any synced platform targets recorded in metadata
+- Platforms with project-local skills directories can be targeted with `--project-dir`
 
 ## External CLI Integration
 
@@ -252,7 +339,6 @@ External CLI support is powered by `opencli`.
 ```bash
 advai cli list
 advai cli info demo-cli
-advai cli install demo-cli --yes
 advai cli install https://github.com/your-org/cli-repo
 advai cli install https://github.com/your-org/cli-repo --cli demo-cli
 advai cli update demo-cli --yes
@@ -299,6 +385,7 @@ advai/
   cli.py            Main CLI entrypoint
   cli_manager.py    Install detection, update commands, OpenCLI integration
   kb.py             Local knowledge base storage and search helpers
+  skill_platforms.py Platform adapter registry and path resolution
   skills.py         Local skill metadata management
   tui.py            Terminal chat UI
 bin/
