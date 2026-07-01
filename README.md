@@ -9,6 +9,7 @@
 </p>
 
 <p align="center">
+  <a href="https://github.com/Advai-X/advai-x-cli/actions/workflows/ci.yml"><img src="https://github.com/Advai-X/advai-x-cli/actions/workflows/ci.yml/badge.svg" alt="CI" /></a>
   <a href="https://pypi.org/project/advai-cli/"><img src="https://img.shields.io/pypi/v/advai-cli" alt="PyPI Version" /></a>
   <a href="https://www.npmjs.com/package/advai-cli"><img src="https://img.shields.io/npm/v/advai-cli" alt="npm Version" /></a>
   <a href="https://pypi.org/project/advai-cli/"><img src="https://img.shields.io/pypi/pyversions/advai-cli" alt="Python Versions" /></a>
