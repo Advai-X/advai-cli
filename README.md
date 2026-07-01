@@ -399,7 +399,6 @@ bin/
 docs/
   assets/
     hero.png        README hero image
-  RELEASE_CHECKLIST.md Release steps for PyPI, npm, and Homebrew tap
 Formula/
   advai-cli.rb      Homebrew formula
 install.sh          Bootstrap installer
