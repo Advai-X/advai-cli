@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "advai-cli"
-version = "1.0.8"
+version = "1.0.9"
 description = "CLI for browser automation, skills, and external CLIs."
 readme = "README.md"
 requires-python = ">=3.10"
