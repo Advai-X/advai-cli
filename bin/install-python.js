@@ -47,7 +47,7 @@ function findPython() {
     const versionCheck = run(candidate.command, [
       ...candidate.prefixArgs,
       "-c",
-      "import sys; sys.exit(0 if sys.version_info >= (3, 8) else 1)",
+      "import sys; sys.exit(0 if sys.version_info >= (3, 10) else 1)",
     ]);
     if (versionCheck.status === 0) {
       return candidate;
@@ -130,7 +130,7 @@ function main() {
 
   const python = findPython();
   if (!python) {
-    fail("Python 3.8+ is required. Please install Python 3 and rerun npm install.");
+    fail("Python 3.10+ is required. Please install Python 3 and rerun npm install.");
   }
 
   ensureVenv(python);

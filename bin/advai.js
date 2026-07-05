@@ -35,7 +35,7 @@ function findPython() {
       [
         ...candidate.prefixArgs,
         "-c",
-        "import sys; sys.exit(0 if sys.version_info >= (3, 8) else 1)",
+        "import sys; sys.exit(0 if sys.version_info >= (3, 10) else 1)",
       ],
       { stdio: "ignore" }
     );
@@ -86,7 +86,7 @@ if (privateAdvai) {
   const python = findPython();
   if (!python) {
     process.stderr.write(
-      "advai requires Python 3.8+ and a working private environment. Reinstall the npm package after installing Python.\n"
+      "advai requires Python 3.10+ and a working private environment. Reinstall the npm package after installing Python.\n"
     );
     process.exit(2);
   }

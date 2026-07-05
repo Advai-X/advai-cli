@@ -1,6 +1,6 @@
 {
   "name": "advai-cli",
-  "version": "1.0.7",
+  "version": "1.0.8",
   "description": "CLI for browser automation, skills, and external CLIs.",
   "homepage": "https://github.com/Advai-X/advai-cli",
   "repository": {
@@ -20,6 +20,7 @@
     "advai/__init__.py",
     "advai/ai_client.py",
     "advai/browser_bridge.py",
+    "advai/browser_daemon.py",
     "advai/cli.py",
     "advai/cli_manager.py",
     "advai/kb.py",

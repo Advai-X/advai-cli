@@ -87,7 +87,7 @@ flowchart LR
 
 ### Requirements
 
-- Python `3.8+`
+- Python `3.10+`
 - Node.js `14+` only if you install through npm
 - A local Python runtime is still required when using the npm package
 - `opencli` is required only for external CLI discovery, install, and passthrough execution
@@ -511,7 +511,7 @@ python -m advai.cli info
 - Knowledge bases are stored under `~/.advai/kbs`
 - Skills are stored under `~/.advai/skills`
 - The recommended self-update command changes depending on whether the tool was installed via `pip`, `npm`, or `brew`
-- npm installation requires Python `3.8+` and prepares a private environment during `postinstall`
+- npm installation requires Python `3.10+` and prepares a private environment during `postinstall`
 
 ## License
 
