@@ -26,6 +26,7 @@ class MetadataTests(unittest.TestCase):
         files = set(package["files"])
 
         self.assertIn("advai/cli.py", files)
+        self.assertIn("advai/browser_bridge.py", files)
         self.assertIn("advai/kb.py", files)
         self.assertIn("bin/advai.js", files)
         self.assertIn("bin/install-python.js", files)

@@ -5,7 +5,7 @@
 <h1 align="center">advai-cli</h1>
 
 <p align="center">
-  A unified CLI for local skills, external CLIs, and terminal AI chat.
+  A unified CLI for local skills, browser automation, external CLIs, and terminal AI chat.
 </p>
 
 <p align="center">
@@ -22,18 +22,20 @@
   <a href="#why-advai-cli">Why</a> •
   <a href="#installation">Installation</a> •
   <a href="#quick-start">Quick Start</a> •
+  <a href="#browser-automation">Browser</a> •
   <a href="#common-commands">Commands</a> •
   <a href="#ai-tui">AI TUI</a> •
   <a href="#development">Development</a>
 </p>
 
-`advai-cli` is a unified command-line interface for managing local skills, working with external CLIs, and chatting with AI from the terminal through a single `advai` entrypoint.
+`advai-cli` is a unified command-line interface for managing local skills, driving a Chrome extension-backed browser bridge, working with external CLIs, and chatting with AI from the terminal through a single `advai` entrypoint.
 
-It is designed as a lightweight Python-first core with npm and Homebrew distribution options, making it easy to install in different developer environments while keeping the runtime model simple and predictable.
+It is designed as a lightweight Python-first core with npm and Homebrew distribution options, making it easy to install in different developer environments while keeping the runtime model simple, local-first, and predictable.
 
 ## Why advai-cli
 
 - One entrypoint for runtime inspection, local skill management, external CLI workflows, and terminal-native AI chat
+- Chrome extension-backed browser automation through `advai browser`
 - Python core for a small, dependency-light implementation
 - npm wrapper for teams that prefer JavaScript-based distribution
 - Homebrew formula for macOS-friendly installation
@@ -45,6 +47,7 @@ It is designed as a lightweight Python-first core with npm and Homebrew distribu
 - Inspect the current installation, runtime, and recommended update command with `advai info` and `advai update`
 - Manage locally installed skills with install, list, info, update, and uninstall commands
 - Sync installed skills into platform-specific agent directories such as Cursor, Claude Code, Codex, TRAE, and more
+- Open, inspect, extract, and automate browser sessions with `advai browser`
 - Discover and install supported third-party CLIs through the OpenCLI ecosystem
 - Create local knowledge bases, add documents, search content, and resync from source files
 - Proxy supported external CLIs through `advai cli <name> ...`
@@ -68,11 +71,14 @@ flowchart LR
 
     A --> C[Python CLI core]
     C --> S[Local Skills Manager]
+    C --> BB[Browser Bridge]
     C --> O[OpenCLI Bridge]
     C --> T[Terminal TUI]
     C --> I[Runtime Inspection]
 
     S --> FS[~/.advai/skills]
+    BB --> BSD[~/.advai/browser]
+    BB --> EXT[Browser extension + local daemon]
     T --> API[OpenAI-compatible API]
     O --> OC[opencli binary]
 ```
@@ -85,6 +91,7 @@ flowchart LR
 - Node.js `14+` only if you install through npm
 - A local Python runtime is still required when using the npm package
 - `opencli` is required only for external CLI discovery, install, and passthrough execution
+- A compatible browser extension package is required only if you want to use `advai browser`
 
 ### Install from PyPI
 
@@ -142,12 +149,82 @@ advai skill list
 advai cli list
 ```
 
+### 5. Verify browser automation
+
+```bash
+advai browser doctor
+advai browser open demo https://example.com
+advai browser exec demo "document.title"
+```
+
+## Browser Automation
+
+`advai browser` provides a Chrome extension-backed automation layer for opening pages, executing JavaScript, waiting for selectors, interacting with inputs, reading network events, and taking screenshots.
+
+### What it uses
+
+- `advai-cli` provides the command surface and browser bridge client
+- A companion browser extension package provides the Chrome extension and local daemon
+- Browser bridge state is stored under `~/.advai/browser`
+- The current release uses a fixed internal extension context for browser routing
+
+### Setup
+
+1. Install the companion browser support package into the same Python environment as `advai-cli`
+2. Install the Chrome extension from the [Chrome Web Store](https://chromewebstore.google.com/detail/advai-cli/fnjeefdjpejiifogeplommidekkbpopn?hl=zh-CN&utm_source=ext_sidebar)
+3. Open the extension once in Chrome to complete the first-run setup
+4. Sign in to any sites you want to automate in that browser context
+5. Run `advai browser doctor` to confirm the daemon and extension are reachable
+
+If the daemon is not already running, browser commands can auto-start it when the companion browser support package is installed in the active Python environment.
+
+### Core workflow
+
+```bash
+advai browser doctor
+advai browser open demo https://example.com
+advai browser wait demo --selector "h1"
+advai browser exec demo "document.title"
+advai browser type demo "#search" "advai browser"
+advai browser click demo "button[type=submit]"
+advai browser screenshot demo --output page.png
+```
+
+### Common browser commands
+
+| Command | Description |
+| --- | --- |
+| `advai browser doctor` | Show daemon status, selected context, and connected extensions |
+| `advai browser extensions` | List connected extension contexts |
+| `advai browser open <session> <url>` | Open a URL in a named browser session |
+| `advai browser navigate <session> <url>` | Navigate the current page |
+| `advai browser state <session>` | Show the current session state |
+| `advai browser exec <session> "<js>"` | Execute JavaScript in the current page |
+| `advai browser wait <session> --selector <css>` | Wait until a selector exists |
+| `advai browser click <session> <selector>` | Click an element |
+| `advai browser type <session> <selector> <text>` | Type text into an input |
+| `advai browser get <session> [--selector <css>]` | Read page or element details |
+| `advai browser extract <session> [code]` | Extract structured data from the page |
+| `advai browser screenshot <session> --output <file>` | Save a screenshot to disk |
+| `advai browser tabs list <session>` | List tabs for a session |
+| `advai browser network start <session> --pattern <text>` | Start network capture |
+| `advai browser network read <session>` | Read captured network events |
+
+### Notes
+
+- Browser sessions are named explicitly, such as `demo`, `zhihu`, or `checkout-flow`
+- Commands wait for the active internal browser context before sending automation actions
+- The browser bridge is local-first and does not require a remote automation service
+- If `doctor` reports that browser support is missing, install the companion browser extension package into the same Python environment as `advai-cli`
+
 ## Common Commands
 
 These are the canonical commands to use in docs, screenshots, and promotional assets:
 
 ```bash
 advai info
+advai browser doctor
+advai browser open demo https://example.com
 advai skill list
 advai cli list
 advai tui
@@ -158,6 +235,10 @@ advai tui
 | `advai --help` | Show the main command help |
 | `advai info` | Show runtime, installation, and environment details |
 | `advai update` | Print the recommended update command for the current install method |
+| `advai browser doctor` | Show browser bridge status and connected extension contexts |
+| `advai browser open <session> <url>` | Open a URL in a named browser session |
+| `advai browser exec <session> "<js>"` | Execute JavaScript in the selected browser context |
+| `advai browser screenshot <session> --output <file>` | Save a browser screenshot to disk |
 | `advai tui` | Start the terminal AI chat interface |
 | `advai skill list` | List locally installed skills |
 | `advai skill info <name>` | Show local metadata for a skill |
@@ -387,6 +468,7 @@ Current scope:
 ```text
 advai/
   ai_client.py      OpenAI-compatible HTTP client
+  browser_bridge.py Chrome extension bridge client
   cli.py            Main CLI entrypoint
   cli_manager.py    Install detection, update commands, OpenCLI integration
   kb.py             Local knowledge base storage and search helpers
@@ -425,6 +507,7 @@ python -m advai.cli info
 ## Operational Notes
 
 - Local state lives under `~/.advai`
+- Browser bridge logs and pid files are stored under `~/.advai/browser`
 - Knowledge bases are stored under `~/.advai/kbs`
 - Skills are stored under `~/.advai/skills`
 - The recommended self-update command changes depending on whether the tool was installed via `pip`, `npm`, or `brew`

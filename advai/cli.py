@@ -1,3 +1,5 @@
+import base64
+import json
 import click
 import os
 import re
@@ -5,6 +7,13 @@ import sys
 
 from advai import __version__
 from advai.ai_client import AIClientError, load_ai_config
+from advai.browser_bridge import (
+    BrowserBridgeClient,
+    BrowserBridgeError,
+    DEFAULT_BROWSER_CONTEXT_ID,
+    DEFAULT_DAEMON_HOST,
+    DEFAULT_DAEMON_PORT,
+)
 from advai.kb import (
     add_document,
     create_knowledge_base,
@@ -413,6 +422,43 @@ def _self_info():
         click.echo(f"    {manager}: {'yes' if available else 'no'}")
 
 
+def _browser_client_from_context(ctx) -> BrowserBridgeClient:
+    browser_client = (ctx.obj or {}).get("browser_client")
+    if browser_client is None:
+        raise click.ClickException("Browser client is not initialized")
+    return browser_client
+
+
+def _raise_browser_error(exc: BrowserBridgeError) -> None:
+    message = str(exc)
+    if exc.hint:
+        message = f"{message}\nHint: {exc.hint}"
+    raise click.ClickException(message) from exc
+
+
+def _browser_print_result(data):
+    if data is None:
+        return
+    if isinstance(data, (dict, list)):
+        click.echo(json.dumps(data, indent=2, ensure_ascii=False))
+    else:
+        click.echo(data)
+
+
+def _browser_send(ctx, action, **payload):
+    client = _browser_client_from_context(ctx)
+    try:
+        return client.send_command(action, **payload)
+    except BrowserBridgeError as exc:
+        _raise_browser_error(exc)
+
+
+def _read_stdin_code(code: str) -> str:
+    if code == "-":
+        return sys.stdin.read()
+    return code
+
+
 @cli.command(name="info")
 def self_info_cmd():
     """Show advai details."""
@@ -446,6 +492,504 @@ def tui_cmd(agent, model, base_url, system_prompt, timeout, no_clear):
         run_tui(config, clear_screen=not no_clear)
     except AIClientError as exc:
         raise click.ClickException(str(exc)) from exc
+
+
+@cli.group(name="browser")
+@click.option(
+    "--host",
+    default=DEFAULT_DAEMON_HOST,
+    envvar="ADVAI_BROWSER_HOST",
+    show_default=True,
+    help="Browser bridge daemon host",
+)
+@click.option(
+    "--port",
+    default=DEFAULT_DAEMON_PORT,
+    envvar="ADVAI_BROWSER_PORT",
+    show_default=True,
+    type=int,
+    help="Browser bridge daemon port",
+)
+@click.pass_context
+def browser_admin(ctx, host, port):
+    """Control a Chrome extension-backed browser bridge."""
+    ctx.ensure_object(dict)
+    ctx.obj["browser_client"] = BrowserBridgeClient(
+        host=host,
+        port=port,
+        context_id=DEFAULT_BROWSER_CONTEXT_ID,
+    )
+
+
+@browser_admin.command(name="doctor")
+@click.pass_context
+def browser_doctor_cmd(ctx):
+    """Check browser bridge connectivity."""
+    client = _browser_client_from_context(ctx)
+    daemon_running = client.ping_daemon()
+    click.echo("Browser bridge:")
+    click.echo(f"  host: {client.host}")
+    click.echo(f"  port: {client.port}")
+    click.echo(f"  daemon_running: {'yes' if daemon_running else 'no'}")
+    click.echo(f"  context_id: {client.context_id or '-'}")
+    click.echo(f"  daemon_log: {client.daemon_log_path}")
+    click.echo(f"  daemon_pid: {client.daemon_pid_path}")
+    if not daemon_running:
+        if client.can_start_daemon():
+            click.echo("  note: daemon can auto-start when a browser command runs")
+        else:
+            click.echo(
+                "  note: install advai-x-crx and start `python -m advai_crx.daemon` to enable browser commands"
+            )
+        return
+    try:
+        extensions = client.list_extensions()
+    except BrowserBridgeError as exc:
+        _raise_browser_error(exc)
+        return
+    click.echo(f"  connected_extensions: {len(extensions)}")
+    for extension in extensions:
+        selected = " [selected]" if client.context_id and extension.get("contextId") == client.context_id else ""
+        click.echo(
+            f"    - {extension.get('contextId')} (v{extension.get('version', '?')}){selected}"
+        )
+
+
+@browser_admin.command(name="extensions")
+@click.pass_context
+def browser_extensions_cmd(ctx):
+    """List connected browser extension contexts."""
+    client = _browser_client_from_context(ctx)
+    try:
+        _browser_print_result(client.list_extensions())
+    except BrowserBridgeError as exc:
+        _raise_browser_error(exc)
+
+
+@browser_admin.command(name="open")
+@click.argument("session")
+@click.argument("url")
+@click.option(
+    "--window",
+    "window_mode",
+    type=click.Choice(["foreground", "background"], case_sensitive=False),
+    default=None,
+    help="Window mode for a new session window",
+)
+@click.pass_context
+def browser_open_cmd(ctx, session, url, window_mode):
+    """Open a URL in a browser session."""
+    result = _browser_send(
+        ctx,
+        "tabs",
+        session=session,
+        op="new",
+        url=url,
+        windowMode=window_mode.lower() if window_mode else None,
+    )
+    _browser_print_result(result.get("data"))
+
+
+@browser_admin.command(name="navigate")
+@click.argument("session")
+@click.argument("url")
+@click.option("--page", default=None, help="Target page or tab identifier")
+@click.pass_context
+def browser_navigate_cmd(ctx, session, url, page):
+    """Navigate the current page."""
+    result = _browser_send(ctx, "navigate", session=session, url=url, page=page)
+    _browser_print_result(result.get("data"))
+
+
+@browser_admin.command(name="state")
+@click.argument("session")
+@click.pass_context
+def browser_state_cmd(ctx, session):
+    """Show the current browser session state."""
+    result = _browser_send(ctx, "state", session=session)
+    _browser_print_result(result.get("data"))
+
+
+@browser_admin.command(name="exec")
+@click.argument("session")
+@click.argument("code")
+@click.option("--page", default=None, help="Target page or tab identifier")
+@click.pass_context
+def browser_exec_cmd(ctx, session, code, page):
+    """Execute JavaScript in the current page."""
+    result = _browser_send(
+        ctx,
+        "exec",
+        session=session,
+        code=_read_stdin_code(code),
+        page=page,
+    )
+    _browser_print_result(result.get("data"))
+
+
+@browser_admin.command(name="click")
+@click.argument("session")
+@click.argument("selector")
+@click.option("--page", default=None, help="Target page or tab identifier")
+@click.pass_context
+def browser_click_cmd(ctx, session, selector, page):
+    """Click an element."""
+    result = _browser_send(
+        ctx,
+        "click",
+        session=session,
+        selector=selector,
+        page=page,
+    )
+    _browser_print_result(result.get("data"))
+
+
+@browser_admin.command(name="type")
+@click.argument("session")
+@click.argument("selector")
+@click.argument("value")
+@click.option("--page", default=None, help="Target page or tab identifier")
+@click.pass_context
+def browser_type_cmd(ctx, session, selector, value, page):
+    """Type text into an input."""
+    result = _browser_send(
+        ctx,
+        "fill",
+        session=session,
+        selector=selector,
+        value=value,
+        page=page,
+    )
+    _browser_print_result(result.get("data"))
+
+
+@browser_admin.command(name="fill")
+@click.argument("session")
+@click.argument("selector")
+@click.argument("value")
+@click.option("--page", default=None, help="Target page or tab identifier")
+@click.pass_context
+def browser_fill_cmd(ctx, session, selector, value, page):
+    """Fill an input field."""
+    result = _browser_send(
+        ctx,
+        "fill",
+        session=session,
+        selector=selector,
+        value=value,
+        page=page,
+    )
+    _browser_print_result(result.get("data"))
+
+
+@browser_admin.command(name="select")
+@click.argument("session")
+@click.argument("selector")
+@click.argument("option")
+@click.option("--page", default=None, help="Target page or tab identifier")
+@click.pass_context
+def browser_select_cmd(ctx, session, selector, option, page):
+    """Select an option."""
+    result = _browser_send(
+        ctx,
+        "select",
+        session=session,
+        selector=selector,
+        option=option,
+        page=page,
+    )
+    _browser_print_result(result.get("data"))
+
+
+@browser_admin.command(name="keys")
+@click.argument("session")
+@click.argument("text")
+@click.option("--page", default=None, help="Target page or tab identifier")
+@click.pass_context
+def browser_keys_cmd(ctx, session, text, page):
+    """Send keystrokes to the page."""
+    result = _browser_send(ctx, "keys", session=session, text=text, page=page)
+    _browser_print_result(result.get("data"))
+
+
+@browser_admin.command(name="wait")
+@click.argument("session")
+@click.option("--selector", default=None, help="Wait until a selector exists")
+@click.option("--text", default=None, help="Wait until the page contains text")
+@click.option("--timeout", default=10000, show_default=True, type=int, help="Wait timeout in milliseconds")
+@click.option("--page", default=None, help="Target page or tab identifier")
+@click.pass_context
+def browser_wait_cmd(ctx, session, selector, text, timeout, page):
+    """Wait for a selector, text, or a fixed delay."""
+    result = _browser_send(
+        ctx,
+        "wait",
+        session=session,
+        selector=selector,
+        text=text,
+        page=page,
+        waitFor="selector" if selector else ("text" if text else None),
+        timeout=timeout,
+    )
+    _browser_print_result(result.get("data"))
+
+
+@browser_admin.command(name="get")
+@click.argument("session")
+@click.option("--selector", default=None, help="Read one element instead of the whole page")
+@click.option("--page", default=None, help="Target page or tab identifier")
+@click.pass_context
+def browser_get_cmd(ctx, session, selector, page):
+    """Get page or element details."""
+    result = _browser_send(
+        ctx,
+        "get",
+        session=session,
+        selector=selector,
+        page=page,
+    )
+    _browser_print_result(result.get("data"))
+
+
+@browser_admin.command(name="find")
+@click.argument("session")
+@click.argument("selector")
+@click.option("--page", default=None, help="Target page or tab identifier")
+@click.pass_context
+def browser_find_cmd(ctx, session, selector, page):
+    """Find all matching elements."""
+    result = _browser_send(
+        ctx,
+        "find",
+        session=session,
+        selector=selector,
+        page=page,
+    )
+    _browser_print_result(result.get("data"))
+
+
+@browser_admin.command(name="extract")
+@click.argument("session")
+@click.argument("code", required=False, default=None)
+@click.option("--page", default=None, help="Target page or tab identifier")
+@click.pass_context
+def browser_extract_cmd(ctx, session, code, page):
+    """Extract structured data with optional JavaScript."""
+    result = _browser_send(
+        ctx,
+        "extract",
+        session=session,
+        code=_read_stdin_code(code) if code else None,
+        page=page,
+    )
+    _browser_print_result(result.get("data"))
+
+
+@browser_admin.command(name="screenshot")
+@click.argument("session")
+@click.option(
+    "--format",
+    "image_format",
+    type=click.Choice(["png", "jpeg"], case_sensitive=False),
+    default="png",
+    show_default=True,
+    help="Screenshot format",
+)
+@click.option("--full-page", is_flag=True, help="Capture the full page")
+@click.option("--width", type=int, default=None, help="Override viewport width")
+@click.option("--height", type=int, default=None, help="Override viewport height")
+@click.option("--page", default=None, help="Target page or tab identifier")
+@click.option("--output", type=click.Path(path_type=str), default=None, help="Write decoded image bytes to a file")
+@click.pass_context
+def browser_screenshot_cmd(ctx, session, image_format, full_page, width, height, page, output):
+    """Capture a screenshot."""
+    result = _browser_send(
+        ctx,
+        "screenshot",
+        session=session,
+        page=page,
+        format=image_format.lower(),
+        fullPage=full_page,
+        width=width,
+        height=height,
+    )
+    screenshot_data = result.get("data")
+    if output:
+        with open(output, "wb") as handle:
+            handle.write(base64.b64decode(screenshot_data))
+        click.echo(f"Saved to {output}")
+        return
+    _browser_print_result(screenshot_data)
+
+
+@browser_admin.command(name="cookies")
+@click.argument("session")
+@click.option("--domain", default=None, help="Filter cookies by domain")
+@click.pass_context
+def browser_cookies_cmd(ctx, session, domain):
+    """List cookies."""
+    result = _browser_send(ctx, "cookies", session=session, domain=domain)
+    _browser_print_result(result.get("data"))
+
+
+@browser_admin.group(name="tabs")
+def browser_tabs_admin():
+    """Manage tabs inside a browser session."""
+
+
+@browser_tabs_admin.command(name="list")
+@click.argument("session")
+@click.pass_context
+def browser_tabs_list_cmd(ctx, session):
+    """List tabs."""
+    result = _browser_send(ctx, "tabs", session=session, op="list")
+    _browser_print_result(result.get("data"))
+
+
+@browser_tabs_admin.command(name="new")
+@click.argument("session")
+@click.option("--url", default=None, help="Optional URL to open")
+@click.pass_context
+def browser_tabs_new_cmd(ctx, session, url):
+    """Open a new tab."""
+    result = _browser_send(ctx, "tabs", session=session, op="new", url=url)
+    _browser_print_result(result.get("data"))
+
+
+@browser_tabs_admin.command(name="select")
+@click.argument("session")
+@click.argument("index", type=int)
+@click.pass_context
+def browser_tabs_select_cmd(ctx, session, index):
+    """Switch to a tab by index."""
+    result = _browser_send(ctx, "tabs", session=session, op="select", index=index)
+    _browser_print_result(result.get("data"))
+
+
+@browser_tabs_admin.command(name="close")
+@click.argument("session")
+@click.argument("index", type=int)
+@click.pass_context
+def browser_tabs_close_cmd(ctx, session, index):
+    """Close a tab by index."""
+    result = _browser_send(ctx, "tabs", session=session, op="close", index=index)
+    _browser_print_result(result.get("data"))
+
+
+@browser_admin.command(name="scroll")
+@click.argument("session")
+@click.option("--selector", default=None, help="Scroll an element into view")
+@click.option("--page", default=None, help="Target page or tab identifier")
+@click.pass_context
+def browser_scroll_cmd(ctx, session, selector, page):
+    """Scroll the page or a matching element."""
+    result = _browser_send(
+        ctx,
+        "scroll",
+        session=session,
+        selector=selector,
+        page=page,
+    )
+    _browser_print_result(result.get("data"))
+
+
+@browser_admin.command(name="back")
+@click.argument("session")
+@click.option("--page", default=None, help="Target page or tab identifier")
+@click.pass_context
+def browser_back_cmd(ctx, session, page):
+    """Go back in browser history."""
+    result = _browser_send(ctx, "back", session=session, page=page)
+    _browser_print_result(result.get("data"))
+
+
+@browser_admin.command(name="close")
+@click.argument("session")
+@click.pass_context
+def browser_close_cmd(ctx, session):
+    """Close a browser session."""
+    result = _browser_send(ctx, "close", session=session)
+    _browser_print_result(result.get("data"))
+
+
+@browser_admin.command(name="cdp")
+@click.argument("session")
+@click.argument("method")
+@click.option("--params", default=None, help="JSON object passed to the CDP method")
+@click.option("--page", default=None, help="Target page or tab identifier")
+@click.pass_context
+def browser_cdp_cmd(ctx, session, method, params, page):
+    """Execute a raw CDP command."""
+    parsed_params = json.loads(params) if params else None
+    result = _browser_send(
+        ctx,
+        "cdp",
+        session=session,
+        page=page,
+        cdpMethod=method,
+        cdpParams=parsed_params,
+    )
+    _browser_print_result(result.get("data"))
+
+
+@browser_admin.group(name="network")
+def browser_network_admin():
+    """Capture browser network activity."""
+
+
+@browser_network_admin.command(name="start")
+@click.argument("session")
+@click.option("--pattern", default=None, help="Only capture matching request URLs")
+@click.option("--page", default=None, help="Target page or tab identifier")
+@click.pass_context
+def browser_network_start_cmd(ctx, session, pattern, page):
+    """Start capturing network requests."""
+    result = _browser_send(
+        ctx,
+        "network-capture-start",
+        session=session,
+        page=page,
+        pattern=pattern,
+    )
+    _browser_print_result(result.get("data"))
+
+
+@browser_network_admin.command(name="read")
+@click.argument("session")
+@click.option("--page", default=None, help="Target page or tab identifier")
+@click.pass_context
+def browser_network_read_cmd(ctx, session, page):
+    """Read captured network requests."""
+    result = _browser_send(ctx, "network-capture-read", session=session, page=page)
+    _browser_print_result(result.get("data"))
+
+
+@browser_admin.command(name="download")
+@click.argument("session")
+@click.option("--pattern", default="", show_default=True, help="Only match download filenames containing this text")
+@click.option("--timeout", default=30000, show_default=True, type=int, help="Download wait timeout in milliseconds")
+@click.pass_context
+def browser_download_cmd(ctx, session, pattern, timeout):
+    """Wait for a download to complete."""
+    result = _browser_send(
+        ctx,
+        "wait-download",
+        session=session,
+        pattern=pattern,
+        timeoutMs=timeout,
+        timeout=timeout,
+    )
+    _browser_print_result(result.get("data"))
+
+
+@browser_admin.command(name="frames")
+@click.argument("session")
+@click.option("--page", default=None, help="Target page or tab identifier")
+@click.pass_context
+def browser_frames_cmd(ctx, session, page):
+    """List page frames."""
+    result = _browser_send(ctx, "frames", session=session, page=page)
+    _browser_print_result(result.get("data"))
 
 
 @cli.group(name="skill")
