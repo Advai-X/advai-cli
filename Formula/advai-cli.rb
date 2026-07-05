@@ -1,10 +1,10 @@
 class AdvaiCli < Formula
   include Language::Python::Virtualenv
 
-  desc "CLI for managing skills and external CLIs"
+  desc "CLI for browser automation, skills, and external CLIs"
   homepage "https://github.com/Advai-X/advai-cli"
-  url "https://files.pythonhosted.org/packages/3a/2e/86f34a4bf0876a6268af1c0f3bd10d510f5c35c9f4eeefd69b333d12db79/advai_cli-1.0.6.tar.gz"
-  sha256 "4304a41aac9f999324f3c6534db842cecb36922463a894ef1a9d6d6a016f3711"
+  url "https://files.pythonhosted.org/packages/59/19/6b5c69e2c9df361012459be7fde9fcf52de94caef75c85ad27287634e06a/advai_cli-1.0.7.tar.gz"
+  sha256 "b4a3a0242118ca1403157b581b88391ce021610a2990f5ae8a603ab1e8f0488d"
   license "MIT"
 
   depends_on "python@3.14"
