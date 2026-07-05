@@ -539,7 +539,7 @@ def browser_doctor_cmd(ctx):
             click.echo("  note: daemon can auto-start when a browser command runs")
         else:
             click.echo(
-                "  note: install advai-x-crx and start `python -m advai_crx.daemon` to enable browser commands"
+                "  note: start `python -m advai.browser_daemon` to enable browser commands"
             )
         return
     try:

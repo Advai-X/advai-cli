@@ -91,7 +91,7 @@ flowchart LR
 - Node.js `14+` only if you install through npm
 - A local Python runtime is still required when using the npm package
 - `opencli` is required only for external CLI discovery, install, and passthrough execution
-- A compatible browser extension package is required only if you want to use `advai browser`
+- A compatible browser extension/runtime is required only if you want to use `advai browser`
 
 ### Install from PyPI
 
@@ -163,20 +163,20 @@ advai browser exec demo "document.title"
 
 ### What it uses
 
-- `advai-cli` provides the command surface and browser bridge client
-- A companion browser extension package provides the Chrome extension and local daemon
+- `advai-cli` provides the command surface, browser bridge client, and built-in local daemon
+- A compatible browser extension/runtime provides the live browser connection
 - Browser bridge state is stored under `~/.advai/browser`
 - The current release uses a fixed internal extension context for browser routing
 
 ### Setup
 
-1. Install the companion browser support package into the same Python environment as `advai-cli`
-2. Install the Chrome extension from the [Chrome Web Store](https://chromewebstore.google.com/detail/advai-cli/fnjeefdjpejiifogeplommidekkbpopn?hl=zh-CN&utm_source=ext_sidebar)
+1. Install the Chrome extension from the [Chrome Web Store](https://chromewebstore.google.com/detail/advai-cli/fnjeefdjpejiifogeplommidekkbpopn?hl=zh-CN&utm_source=ext_sidebar)
+2. Make sure the local browser runtime is available on this machine
 3. Open the extension once in Chrome to complete the first-run setup
 4. Sign in to any sites you want to automate in that browser context
 5. Run `advai browser doctor` to confirm the daemon and extension are reachable
 
-If the daemon is not already running, browser commands can auto-start it when the companion browser support package is installed in the active Python environment.
+If the daemon is not already running, browser commands can auto-start the built-in advai browser daemon.
 
 ### Core workflow
 
@@ -215,7 +215,7 @@ advai browser screenshot demo --output page.png
 - Browser sessions are named explicitly, such as `demo`, `zhihu`, or `checkout-flow`
 - Commands wait for the active internal browser context before sending automation actions
 - The browser bridge is local-first and does not require a remote automation service
-- If `doctor` reports that browser support is missing, install the companion browser extension package into the same Python environment as `advai-cli`
+- If `doctor` reports that browser support is missing, verify that the browser extension/runtime is installed and reachable locally
 
 ## Common Commands
 

@@ -11,7 +11,7 @@ from typing import Any, Optional
 
 
 DEFAULT_DAEMON_HOST = "127.0.0.1"
-DEFAULT_DAEMON_PORT = 19825
+DEFAULT_DAEMON_PORT = 19826
 DEFAULT_BROWSER_STATE_DIR = os.path.expanduser("~/.advai/browser")
 DEFAULT_DAEMON_LOG_PATH = os.path.join(DEFAULT_BROWSER_STATE_DIR, "daemon.log")
 DEFAULT_DAEMON_PID_PATH = os.path.join(DEFAULT_BROWSER_STATE_DIR, "daemon.pid")
@@ -29,6 +29,9 @@ class BrowserBridgeError(Exception):
         super().__init__(message)
         self.code = code
         self.hint = hint
+
+
+OPENCLI_HEADER_ERROR = "Forbidden: missing X-OpenCLI header"
 
 
 def load_browser_context_id(explicit: Optional[str] = None) -> Optional[str]:
@@ -95,8 +98,8 @@ class BrowserBridgeClient:
                 "Browser bridge daemon is not running.",
                 code="daemon_unavailable",
                 hint=(
-                    "Install advai-x-crx in the same Python environment, or start it "
-                    "manually with `python -m advai_crx.daemon`, then load the Chrome extension."
+                    "Start the built-in browser daemon with a browser command, or run "
+                    "`python -m advai.browser_daemon` manually, then make sure the browser extension is connected."
                 ),
             )
 
@@ -114,7 +117,7 @@ class BrowserBridgeClient:
 
     def can_start_daemon(self) -> bool:
         try:
-            return importlib.util.find_spec("advai_crx.daemon") is not None
+            return importlib.util.find_spec("advai.browser_daemon") is not None
         except ModuleNotFoundError:
             return False
 
@@ -190,7 +193,7 @@ class BrowserBridgeClient:
         os.makedirs(os.path.dirname(self.daemon_log_path), exist_ok=True)
         with open(self.daemon_log_path, "a", encoding="utf-8") as log_handle:
             subprocess.Popen(
-                [sys.executable, "-m", "advai_crx.daemon"],
+                [sys.executable, "-m", "advai.browser_daemon"],
                 stdout=log_handle,
                 stderr=log_handle,
                 start_new_session=True,
@@ -241,14 +244,24 @@ class BrowserBridgeClient:
                 return response.read()
         except urllib.error.HTTPError as exc:
             message = self._parse_error_body(exc.read())
+            if message == OPENCLI_HEADER_ERROR:
+                raise BrowserBridgeError(
+                    "Browser bridge port is occupied by an OpenCLI daemon.",
+                    code="daemon_port_conflict",
+                    hint=(
+                        f"Advai browser defaults to port {DEFAULT_DAEMON_PORT}. "
+                        "Use --port/ADVAI_BROWSER_PORT to point at an advai browser daemon, "
+                        "or stop the OpenCLI daemon that is bound to this port."
+                    ),
+                ) from exc
             raise BrowserBridgeError(message, code="http_error") from exc
         except urllib.error.URLError as exc:
             raise BrowserBridgeError(
                 f"Cannot reach browser bridge daemon at {self.base_url}",
                 code="daemon_unreachable",
                 hint=(
-                    "Start advai-x-crx with `python -m advai_crx.daemon` and make sure "
-                    "the Chrome extension is installed."
+                    "Start the built-in browser daemon with `python -m advai.browser_daemon` "
+                    "and make sure the browser extension is installed."
                 ),
             ) from exc
 
