@@ -1,13 +1,17 @@
+import asyncio
+import dataclasses
+import errno
 import json
+import logging
 import os
-import shutil
-import subprocess
+import threading
 import time
 import urllib.error
-import urllib.parse
 import urllib.request
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from typing import Any, Optional
+
+from aiohttp import WSMsgType, web
 
 from advai.browser_bridge import (
     DEFAULT_BROWSER_CONTEXT_ID,
@@ -18,14 +22,15 @@ from advai.browser_bridge import (
 )
 
 
-OPENCLI_DAEMON_HOST = "127.0.0.1"
-OPENCLI_DAEMON_PORT = 19825
-OPENCLI_BASE_URL = f"http://{OPENCLI_DAEMON_HOST}:{OPENCLI_DAEMON_PORT}"
-OPENCLI_HEADERS = {
+EXTENSION_DAEMON_HOST = "127.0.0.1"
+EXTENSION_DAEMON_PORT = 19827
+EXTENSION_DAEMON_BASE_URL = f"http://{EXTENSION_DAEMON_HOST}:{EXTENSION_DAEMON_PORT}"
+EXTENSION_DAEMON_HEADERS = {
     "Accept": "application/json",
     "Content-Type": "application/json",
-    "X-OpenCLI": "1",
 }
+
+logger = logging.getLogger(__name__)
 
 
 class DaemonError(Exception):
@@ -43,45 +48,266 @@ class DaemonError(Exception):
         self.status = status
 
 
-class OpenCLIDaemonClient:
-    def __init__(self, base_url: str = OPENCLI_BASE_URL) -> None:
+@dataclasses.dataclass
+class ExtensionInfo:
+    context_id: str
+    version: str
+    compat_range: str
+    connected_at: float = dataclasses.field(default_factory=time.time)
+
+
+class EmbeddedExtensionDaemon:
+    def __init__(self, host: str = EXTENSION_DAEMON_HOST, port: int = EXTENSION_DAEMON_PORT) -> None:
+        self.host = host
+        self.port = port
+        self.bound_port = port
+        self._extensions: dict[str, tuple[web.WebSocketResponse, ExtensionInfo]] = {}
+        self._pending: dict[str, asyncio.Future[dict[str, Any]]] = {}
+        self._app: Optional[web.Application] = None
+        self._runner: Optional[web.AppRunner] = None
+        self._site: Optional[web.TCPSite] = None
+        self._loop: Optional[asyncio.AbstractEventLoop] = None
+        self._thread: Optional[threading.Thread] = None
+        self._ready_event = threading.Event()
+        self._startup_error: Optional[BaseException] = None
+
+    def _make_app(self) -> web.Application:
+        app = web.Application()
+        app.router.add_get("/ping", self._handle_ping)
+        app.router.add_get("/ext", self._handle_ws)
+        app.router.add_post("/command", self._handle_command)
+        app.router.add_get("/extensions", self._handle_list_extensions)
+        return app
+
+    async def start(self) -> None:
+        if self._runner is not None:
+            return
+        self._app = self._make_app()
+        self._runner = web.AppRunner(self._app)
+        await self._runner.setup()
+        self._site = web.TCPSite(self._runner, self.host, self.port)
+        await self._site.start()
+        if self._site._server and self._site._server.sockets:
+            socket_name = self._site._server.sockets[0].getsockname()
+            self.bound_port = int(socket_name[1])
+        logger.info("Embedded extension daemon listening on %s:%d", self.host, self.bound_port)
+
+    async def shutdown(self) -> None:
+        await self._close_extensions()
+        for future in list(self._pending.values()):
+            if not future.done():
+                future.set_exception(ConnectionError("Extension daemon shutting down"))
+        self._pending.clear()
+        if self._runner is not None:
+            await self._runner.cleanup()
+        self._app = None
+        self._runner = None
+        self._site = None
+
+    def start_background(self, timeout: float = 5.0) -> None:
+        if self._thread and self._thread.is_alive():
+            return
+        self._ready_event.clear()
+        self._startup_error = None
+        self._thread = threading.Thread(target=self._thread_main, name="advai-extension-daemon", daemon=True)
+        self._thread.start()
+        if not self._ready_event.wait(timeout):
+            raise RuntimeError("Embedded extension daemon did not start in time")
+        if self._startup_error is not None:
+            if isinstance(self._startup_error, OSError) and self._startup_error.errno == errno.EADDRINUSE:
+                raise RuntimeError(
+                    f"Advai embedded extension daemon port {self.port} is already in use."
+                ) from self._startup_error
+            raise RuntimeError("Failed to start embedded extension daemon") from self._startup_error
+
+    def stop_background(self, timeout: float = 5.0) -> None:
+        loop = self._loop
+        thread = self._thread
+        if loop is None or thread is None:
+            return
+        future = asyncio.run_coroutine_threadsafe(self.shutdown(), loop)
+        future.result(timeout=timeout)
+        loop.call_soon_threadsafe(loop.stop)
+        thread.join(timeout)
+        self._loop = None
+        self._thread = None
+
+    def _thread_main(self) -> None:
+        loop = asyncio.new_event_loop()
+        self._loop = loop
+        asyncio.set_event_loop(loop)
+        try:
+            loop.run_until_complete(self.start())
+        except BaseException as exc:
+            self._startup_error = exc
+            self._ready_event.set()
+            loop.close()
+            return
+        self._ready_event.set()
+        try:
+            loop.run_forever()
+        finally:
+            if self._runner is not None:
+                loop.run_until_complete(self.shutdown())
+            loop.close()
+
+    def list_extensions(self) -> list[dict[str, Any]]:
+        return [
+            {
+                "contextId": context_id,
+                "version": info.version,
+                "compatRange": info.compat_range,
+                "connectedAt": info.connected_at,
+            }
+            for context_id, (_ws, info) in self._extensions.items()
+        ]
+
+    async def send_command(self, body: dict[str, Any]) -> dict[str, Any]:
+        cmd_id = body.get("id")
+        if not cmd_id:
+            raise DaemonError("Missing command id", status=400)
+
+        context_id = body.get("contextId")
+        if context_id and context_id not in self._extensions:
+            raise DaemonError(
+                f"Extension context not found: {context_id}",
+                code="extension_not_found",
+                status=404,
+            )
+
+        if not context_id:
+            if not self._extensions:
+                raise DaemonError(
+                    "No Chrome extension connected.",
+                    code="extension_not_ready",
+                    hint="Open the browser extension popup or wait for it to reconnect.",
+                    status=503,
+                )
+            context_id = next(iter(self._extensions.keys()))
+
+        ws, _info = self._extensions[context_id]
+        if ws.closed:
+            del self._extensions[context_id]
+            raise DaemonError("Extension connection closed", code="extension_closed", status=502)
+
+        future: asyncio.Future[dict[str, Any]] = asyncio.get_running_loop().create_future()
+        self._pending[cmd_id] = future
+
+        try:
+            body["contextId"] = context_id
+            await ws.send_json(body)
+        except Exception as exc:
+            self._pending.pop(cmd_id, None)
+            raise DaemonError(f"Failed to send to extension: {exc}", code="extension_send_failed", status=502) from exc
+
+        timeout = body.get("timeout", 60)
+        if isinstance(timeout, (int, float)) and timeout > 1000:
+            timeout = float(timeout) / 1000.0
+        try:
+            return await asyncio.wait_for(future, timeout=float(timeout))
+        except asyncio.TimeoutError as exc:
+            self._pending.pop(cmd_id, None)
+            raise DaemonError("Command timed out", code="timeout", status=504) from exc
+
+    async def _handle_ping(self, request: web.Request) -> web.Response:
+        _ = request
+        return web.Response(text="pong", content_type="text/plain")
+
+    async def _handle_list_extensions(self, request: web.Request) -> web.Response:
+        _ = request
+        return web.json_response({"extensions": self.list_extensions()})
+
+    async def _handle_command(self, request: web.Request) -> web.Response:
+        try:
+            body = await request.json()
+        except json.JSONDecodeError:
+            return web.json_response({"ok": False, "error": "Invalid JSON"}, status=400)
+        try:
+            response = await self.send_command(body)
+            return web.json_response(response)
+        except DaemonError as exc:
+            payload = {"ok": False, "error": str(exc)}
+            if exc.code:
+                payload["errorCode"] = exc.code
+            if exc.hint:
+                payload["errorHint"] = exc.hint
+            return web.json_response(payload, status=exc.status)
+
+    async def _handle_ws(self, request: web.Request) -> web.WebSocketResponse:
+        ws = web.WebSocketResponse()
+        await ws.prepare(request)
+
+        context_id: Optional[str] = None
+        try:
+            async for msg in ws:
+                if msg.type != WSMsgType.TEXT:
+                    continue
+                try:
+                    data = json.loads(msg.data)
+                except json.JSONDecodeError:
+                    continue
+
+                msg_type = data.get("type")
+                if msg_type == "hello":
+                    context_id = data.get("contextId", "unknown")
+                    info = ExtensionInfo(
+                        context_id=context_id,
+                        version=data.get("version", "unknown"),
+                        compat_range=data.get("compatRange", ">=1.0.0"),
+                    )
+                    self._extensions[context_id] = (ws, info)
+                    logger.info("Extension connected: context=%s version=%s", context_id, info.version)
+                    await ws.send_json({"type": "hello-ack", "ok": True})
+                    continue
+
+                if msg_type == "log":
+                    level = data.get("level", "info")
+                    msg_text = data.get("msg", "")
+                    log_method = getattr(logger, level, logger.info)
+                    log_method("[ext] %s", msg_text)
+                    continue
+
+                if "id" in data and "ok" in data:
+                    future = self._pending.pop(data["id"], None)
+                    if future is not None and not future.done():
+                        future.set_result(data)
+        finally:
+            if context_id and context_id in self._extensions:
+                del self._extensions[context_id]
+                logger.info("Extension disconnected: context=%s", context_id)
+            for future in list(self._pending.values()):
+                if not future.done():
+                    future.set_exception(ConnectionError("Extension disconnected"))
+            self._pending.clear()
+        return ws
+
+    async def _close_extensions(self) -> None:
+        for context_id, (ws, _info) in list(self._extensions.items()):
+            try:
+                await ws.close(code=1001, message=b"daemon shutting down")
+            except Exception as exc:
+                logger.debug("Failed to close extension %s cleanly: %s", context_id, exc)
+            finally:
+                self._extensions.pop(context_id, None)
+
+
+class ExtensionDaemonClient:
+    def __init__(self, base_url: str = EXTENSION_DAEMON_BASE_URL) -> None:
         self.base_url = base_url.rstrip("/")
 
     def ping(self) -> bool:
         try:
             request = urllib.request.Request(f"{self.base_url}/ping", headers={"Accept": "application/json"})
             with urllib.request.urlopen(request, timeout=2) as response:
-                payload = json.loads(response.read().decode("utf-8"))
+                body = response.read()
+            if body.decode("utf-8", errors="replace").strip() == "pong":
+                return True
+            payload = json.loads(body.decode("utf-8"))
             return payload.get("ok") is True
         except Exception:
             return False
 
     def ensure_daemon(self, timeout: float = 15.0) -> None:
-        if self.ping():
-            return
-        if shutil.which("opencli") is None:
-            raise DaemonError(
-                "Underlying browser engine is unavailable.",
-                code="opencli_missing",
-                hint="Install opencli and its browser extension, then rerun the browser command.",
-                status=503,
-            )
-        try:
-            subprocess.run(
-                ["opencli", "daemon", "restart"],
-                check=False,
-                stdout=subprocess.DEVNULL,
-                stderr=subprocess.DEVNULL,
-                timeout=30,
-            )
-        except Exception as exc:
-            raise DaemonError(
-                "Failed to start the underlying browser engine.",
-                code="opencli_start_failed",
-                hint="Run `opencli daemon restart` manually and verify the browser extension is connected.",
-                status=503,
-            ) from exc
-
         start = time.time()
         while time.time() - start < timeout:
             if self.ping():
@@ -89,21 +315,20 @@ class OpenCLIDaemonClient:
             time.sleep(0.25)
 
         raise DaemonError(
-            "Underlying browser engine is not reachable.",
-            code="opencli_unreachable",
-            hint="Run `opencli daemon status` and make sure the browser extension is connected.",
+            "Embedded extension daemon is not reachable.",
+            code="embedded_extension_daemon_unreachable",
+            hint=(
+                f"Restart `python -m advai.browser_daemon` and make sure the browser extension "
+                f"is reloaded so it connects to Advai's dedicated extension port {EXTENSION_DAEMON_PORT}."
+            ),
             status=503,
         )
 
-    def status(self, context_id: Optional[str] = None) -> dict[str, Any]:
+    def list_extensions(self, context_id: Optional[str] = None) -> list[dict[str, Any]]:
         self.ensure_daemon()
-        query = f"?contextId={urllib.parse.quote(context_id)}" if context_id else ""
-        request = urllib.request.Request(
-            f"{self.base_url}/status{query}",
-            headers={"Accept": "application/json", "X-OpenCLI": "1"},
-        )
-        with urllib.request.urlopen(request, timeout=5) as response:
-            return json.loads(response.read().decode("utf-8"))
+        _ = context_id
+        response = self._request_json("GET", "/extensions", timeout=5)
+        return response.get("extensions", [])
 
     def send_command(self, action: str, payload: dict[str, Any]) -> dict[str, Any]:
         self.ensure_daemon()
@@ -111,7 +336,7 @@ class OpenCLIDaemonClient:
         request = urllib.request.Request(
             f"{self.base_url}/command",
             data=body,
-            headers=OPENCLI_HEADERS,
+            headers=EXTENSION_DAEMON_HEADERS,
             method="POST",
         )
         try:
@@ -130,22 +355,41 @@ class OpenCLIDaemonClient:
                 status=exc.code,
             ) from exc
 
+    def _request_json(
+        self,
+        method: str,
+        path: str,
+        *,
+        timeout: float = 10.0,
+    ) -> dict[str, Any]:
+        request = urllib.request.Request(
+            f"{self.base_url}{path}",
+            headers={"Accept": "application/json"},
+            method=method,
+        )
+        try:
+            with urllib.request.urlopen(request, timeout=timeout) as response:
+                return json.loads(response.read().decode("utf-8"))
+        except urllib.error.HTTPError as exc:
+            payload = exc.read().decode("utf-8", errors="replace")
+            try:
+                parsed = json.loads(payload)
+            except json.JSONDecodeError:
+                raise DaemonError(payload or "Browser daemon request failed", status=exc.code) from exc
+            raise DaemonError(
+                parsed.get("error") or parsed.get("message") or "Browser daemon request failed",
+                code=parsed.get("errorCode"),
+                hint=parsed.get("errorHint"),
+                status=exc.code,
+            ) from exc
+
 
 class InternalBrowserBridge:
-    def __init__(self, engine: Optional[OpenCLIDaemonClient] = None) -> None:
-        self.engine = engine or OpenCLIDaemonClient()
+    def __init__(self, engine: Optional[ExtensionDaemonClient] = None) -> None:
+        self.engine = engine or ExtensionDaemonClient()
 
     def list_extensions(self, context_id: Optional[str]) -> list[dict[str, Any]]:
-        _ = context_id
-        status = self.engine.status()
-        profiles = status.get("profiles", [])
-        return [
-            {
-                "contextId": profile.get("contextId"),
-                "version": profile.get("extensionVersion") or "?",
-            }
-            for profile in profiles
-        ]
+        return self.engine.list_extensions(context_id)
 
     def handle_command(self, payload: dict[str, Any]) -> dict[str, Any]:
         command_id = payload.get("id")
@@ -507,7 +751,7 @@ class InternalBrowserBridge:
 }})()
 """
 
-
+EMBEDDED_EXTENSION_DAEMON = EmbeddedExtensionDaemon()
 BRIDGE = InternalBrowserBridge()
 
 
@@ -562,11 +806,31 @@ class AdvaiBrowserDaemonHandler(BaseHTTPRequestHandler):
 
 
 def main() -> None:
+    logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
     os.makedirs(os.path.dirname(DEFAULT_DAEMON_LOG_PATH), exist_ok=True)
-    with open(DEFAULT_DAEMON_PID_PATH, "w", encoding="utf-8") as handle:
-        handle.write(str(os.getpid()))
+    pid_written = False
+    try:
+        with open(DEFAULT_DAEMON_PID_PATH, "w", encoding="utf-8") as handle:
+            handle.write(str(os.getpid()))
+        pid_written = True
+    except OSError as exc:
+        logger.warning("Failed to write daemon pid file %s: %s", DEFAULT_DAEMON_PID_PATH, exc)
+    try:
+        EMBEDDED_EXTENSION_DAEMON.start_background()
+    except RuntimeError as exc:
+        logger.error("%s", exc)
+        raise
     server = ThreadingHTTPServer((DEFAULT_DAEMON_HOST, DEFAULT_DAEMON_PORT), AdvaiBrowserDaemonHandler)
-    server.serve_forever()
+    try:
+        server.serve_forever()
+    finally:
+        server.server_close()
+        EMBEDDED_EXTENSION_DAEMON.stop_background()
+        if pid_written:
+            try:
+                os.unlink(DEFAULT_DAEMON_PID_PATH)
+            except OSError:
+                pass
 
 
 if __name__ == "__main__":

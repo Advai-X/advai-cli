@@ -548,6 +548,10 @@ def browser_doctor_cmd(ctx):
         _raise_browser_error(exc)
         return
     click.echo(f"  connected_extensions: {len(extensions)}")
+    if not extensions:
+        click.echo(
+            "  note: no browser extension is connected right now; open the extension popup or wait for it to reconnect"
+        )
     for extension in extensions:
         selected = " [selected]" if client.context_id and extension.get("contextId") == client.context_id else ""
         click.echo(

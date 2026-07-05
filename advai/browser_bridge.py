@@ -191,13 +191,24 @@ class BrowserBridgeClient:
         if self.ping_daemon():
             return
         os.makedirs(os.path.dirname(self.daemon_log_path), exist_ok=True)
-        with open(self.daemon_log_path, "a", encoding="utf-8") as log_handle:
+        log_handle = None
+        try:
+            log_handle = open(self.daemon_log_path, "a", encoding="utf-8")
+            stdout_target = log_handle
+            stderr_target = log_handle
+        except OSError:
+            stdout_target = subprocess.DEVNULL
+            stderr_target = subprocess.DEVNULL
+        try:
             subprocess.Popen(
                 [sys.executable, "-m", "advai.browser_daemon"],
-                stdout=log_handle,
-                stderr=log_handle,
+                stdout=stdout_target,
+                stderr=stderr_target,
                 start_new_session=True,
             )
+        finally:
+            if log_handle is not None:
+                log_handle.close()
         time.sleep(0.5)
 
     def _http_timeout_for_command(self, command_timeout: Any) -> float:

@@ -2,6 +2,7 @@ import base64
 import io
 import json
 import os
+import subprocess
 import tempfile
 import urllib.error
 import unittest
@@ -58,6 +59,20 @@ class BrowserCliTests(unittest.TestCase):
         self.assertEqual(result.exit_code, 0)
         self.assertIn("daemon_running: no", result.output)
         self.assertIn("daemon can auto-start when a browser command runs", result.output)
+
+    def test_browser_doctor_shows_extension_reconnect_hint_when_none_connected(self):
+        runner = CliRunner()
+        client = self._make_client()
+        client.context_id = DEFAULT_BROWSER_CONTEXT_ID
+        client.ping_daemon.return_value = True
+        client.list_extensions.return_value = []
+
+        with mock.patch("advai.cli.BrowserBridgeClient", return_value=client):
+            result = runner.invoke(cli, ["browser", "doctor"])
+
+        self.assertEqual(result.exit_code, 0)
+        self.assertIn("connected_extensions: 0", result.output)
+        self.assertIn("open the extension popup or wait for it to reconnect", result.output)
 
     def test_browser_uses_fixed_context_id(self):
         runner = CliRunner()
@@ -238,6 +253,37 @@ class BrowserBridgeClientTests(unittest.TestCase):
         self.assertEqual(str(ctx.exception), "Browser bridge port is occupied by an OpenCLI daemon.")
         self.assertEqual(ctx.exception.code, "daemon_port_conflict")
         self.assertIn(str(DEFAULT_DAEMON_PORT), ctx.exception.hint)
+
+    def test_wait_for_extension_reports_reconnect_hint(self):
+        client = BrowserBridgeClient(context_id=DEFAULT_BROWSER_CONTEXT_ID)
+
+        with mock.patch.object(client, "_request_json", return_value={"extensions": []}), mock.patch(
+            "advai.browser_bridge.time.sleep"
+        ), mock.patch(
+            "advai.browser_bridge.time.time", side_effect=[0.0, 0.2]
+        ):
+            with self.assertRaises(BrowserBridgeError) as ctx:
+                client.wait_for_extension(timeout=0.1)
+
+        self.assertIn("Refreshing the extension popup can force a reconnect.", ctx.exception.hint)
+
+    def test_start_daemon_background_falls_back_when_log_is_not_writable(self):
+        client = BrowserBridgeClient()
+
+        with mock.patch.object(client, "ping_daemon", return_value=False), mock.patch(
+            "advai.browser_bridge.os.makedirs"
+        ), mock.patch(
+            "builtins.open", side_effect=PermissionError("no write")
+        ), mock.patch(
+            "advai.browser_bridge.subprocess.Popen"
+        ) as popen, mock.patch(
+            "advai.browser_bridge.time.sleep"
+        ):
+            client._start_daemon_background()
+
+        _, kwargs = popen.call_args
+        self.assertEqual(kwargs["stdout"], subprocess.DEVNULL)
+        self.assertEqual(kwargs["stderr"], subprocess.DEVNULL)
 
 
 if __name__ == "__main__":

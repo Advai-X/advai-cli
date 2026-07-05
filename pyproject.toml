@@ -19,6 +19,7 @@ classifiers = [
     "Environment :: Console",
 ]
 dependencies = [
+    "aiohttp>=3.9",
     "click>=8.1",
 ]
 
