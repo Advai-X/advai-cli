@@ -580,17 +580,48 @@ def browser_extensions_cmd(ctx):
     default=None,
     help="Window mode for a new session window",
 )
+@click.option(
+    "--replace",
+    is_flag=True,
+    help="Reuse the current tab when the session already has one",
+)
 @click.pass_context
-def browser_open_cmd(ctx, session, url, window_mode):
+def browser_open_cmd(ctx, session, url, window_mode, replace):
     """Open a URL in a browser session."""
-    result = _browser_send(
-        ctx,
-        "tabs",
-        session=session,
-        op="new",
-        url=url,
-        windowMode=window_mode.lower() if window_mode else None,
-    )
+    if replace and window_mode is not None:
+        raise click.ClickException("`--replace` cannot be used together with `--window`.")
+
+    if replace:
+        client = _browser_client_from_context(ctx)
+        try:
+            result = client.send_command(
+                "navigate",
+                session=session,
+                url=url,
+                page=None,
+            )
+        except BrowserBridgeError as exc:
+            if exc.code != "no_target":
+                _raise_browser_error(exc)
+            try:
+                result = client.send_command(
+                    "tabs",
+                    session=session,
+                    op="new",
+                    url=url,
+                    windowMode=None,
+                )
+            except BrowserBridgeError as fallback_exc:
+                _raise_browser_error(fallback_exc)
+    else:
+        result = _browser_send(
+            ctx,
+            "tabs",
+            session=session,
+            op="new",
+            url=url,
+            windowMode=window_mode.lower() if window_mode else None,
+        )
     _browser_print_result(result.get("data"))
 
 

@@ -24,7 +24,7 @@
   <a href="#quick-start">Quick Start</a> •
   <a href="#browser-automation">Browser</a> •
   <a href="#common-commands">Commands</a> •
-  <a href="#ai-tui">AI TUI</a> •
+  <a href="#tui">TUI</a> •
   <a href="#development">Development</a>
 </p>
 
@@ -183,6 +183,7 @@ If the daemon is not already running, browser commands can auto-start the built-
 ```bash
 advai browser doctor
 advai browser open demo https://example.com
+advai browser open demo https://example.com --replace
 advai browser wait demo --selector "h1"
 advai browser exec demo "document.title"
 advai browser type demo "#search" "advai browser"
@@ -197,6 +198,7 @@ advai browser screenshot demo --output page.png
 | `advai browser doctor` | Show daemon status, selected context, and connected extensions |
 | `advai browser extensions` | List connected extension contexts |
 | `advai browser open <session> <url>` | Open a URL in a named browser session |
+| `advai browser open <session> <url> --replace` | Reuse the current tab if the session already has one |
 | `advai browser navigate <session> <url>` | Navigate the current page |
 | `advai browser state <session>` | Show the current session state |
 | `advai browser exec <session> "<js>"` | Execute JavaScript in the current page |
@@ -213,6 +215,7 @@ advai browser screenshot demo --output page.png
 ### Notes
 
 - Browser sessions are named explicitly, such as `demo`, `zhihu`, or `checkout-flow`
+- `open` creates a new tab by default; use `open --replace` to reuse the current tab for the session
 - Commands wait for the active internal browser context before sending automation actions
 - The browser bridge is local-first and does not require a remote automation service
 - If `doctor` reports that browser support is missing, verify that the browser extension/runtime is installed and reachable locally
@@ -237,9 +240,10 @@ advai tui
 | `advai update` | Print the recommended update command for the current install method |
 | `advai browser doctor` | Show browser bridge status and connected extension contexts |
 | `advai browser open <session> <url>` | Open a URL in a named browser session |
+| `advai browser open <session> <url> --replace` | Reuse the current tab if the session already has one |
 | `advai browser exec <session> "<js>"` | Execute JavaScript in the selected browser context |
 | `advai browser screenshot <session> --output <file>` | Save a browser screenshot to disk |
-| `advai tui` | Start the terminal AI chat interface |
+| `advai tui` | Start the terminal chat interface |
 | `advai skill list` | List locally installed skills |
 | `advai skill info <name>` | Show local metadata for a skill |
 | `advai skill install <github-url> [--skill <name>]` | Install skill definitions from a GitHub repo |
@@ -263,7 +267,7 @@ advai tui
 | `advai kb search <name> <query>` | Search stored knowledge base documents |
 | `advai kb sync <name>` | Refresh stored documents from their source files |
 
-## AI TUI
+## TUI
 
 The TUI connects to any OpenAI-compatible `/chat/completions` backend and runs entirely inside the terminal.
 

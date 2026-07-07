@@ -113,6 +113,73 @@ class BrowserCliTests(unittest.TestCase):
         )
         self.assertIn('"page": "12"', result.output)
 
+    def test_browser_open_replace_uses_navigate(self):
+        runner = CliRunner()
+        client = self._make_client()
+        client.send_command.return_value = {"ok": True, "data": {"page": "12", "url": "https://example.com"}}
+
+        with mock.patch("advai.cli.BrowserBridgeClient", return_value=client):
+            result = runner.invoke(
+                cli,
+                ["browser", "open", "demo", "https://example.com", "--replace"],
+            )
+
+        self.assertEqual(result.exit_code, 0)
+        client.send_command.assert_called_once_with(
+            "navigate",
+            session="demo",
+            url="https://example.com",
+            page=None,
+        )
+        self.assertIn('"url": "https://example.com"', result.output)
+
+    def test_browser_open_replace_falls_back_to_new_tab_when_session_has_no_page(self):
+        runner = CliRunner()
+        client = self._make_client()
+        client.send_command.side_effect = [
+            BrowserBridgeError("No active tab", code="no_target"),
+            {"ok": True, "data": {"page": "12"}},
+        ]
+
+        with mock.patch("advai.cli.BrowserBridgeClient", return_value=client):
+            result = runner.invoke(
+                cli,
+                ["browser", "open", "demo", "https://example.com", "--replace"],
+            )
+
+        self.assertEqual(result.exit_code, 0)
+        self.assertEqual(
+            client.send_command.call_args_list,
+            [
+                mock.call(
+                    "navigate",
+                    session="demo",
+                    url="https://example.com",
+                    page=None,
+                ),
+                mock.call(
+                    "tabs",
+                    session="demo",
+                    op="new",
+                    url="https://example.com",
+                    windowMode=None,
+                ),
+            ],
+        )
+
+    def test_browser_open_replace_rejects_window_mode(self):
+        runner = CliRunner()
+        client = self._make_client()
+
+        with mock.patch("advai.cli.BrowserBridgeClient", return_value=client):
+            result = runner.invoke(
+                cli,
+                ["browser", "open", "demo", "https://example.com", "--replace", "--window", "foreground"],
+            )
+
+        self.assertNotEqual(result.exit_code, 0)
+        self.assertIn("`--replace` cannot be used together with `--window`.", result.output)
+
     def test_browser_exec_reads_code_from_stdin(self):
         runner = CliRunner()
         client = self._make_client()
