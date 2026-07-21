@@ -1,0 +1,44 @@
+name: Homebrew Core Prep
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: Published advai-cli version to prepare for homebrew-core
+        required: true
+      write_formula:
+        description: Also update Formula/advai-cli.rb in the workflow workspace
+        required: false
+        default: "true"
+
+jobs:
+  prepare-homebrew-core:
+    name: Prepare homebrew-core update assets
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Generate formula assets
+        run: |
+          write_flag=""
+          if [ "${{ inputs.write_formula }}" = "true" ]; then
+            write_flag="--write-formula"
+          fi
+
+          python scripts/prepare_homebrew_formula.py \
+            --version "${{ inputs.version }}" \
+            --output-dir artifacts/homebrew-core \
+            ${write_flag}
+
+      - name: Upload homebrew-core artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: homebrew-core-advai-cli-${{ inputs.version }}
+          path: artifacts/homebrew-core

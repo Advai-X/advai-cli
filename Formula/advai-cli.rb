@@ -3,8 +3,8 @@ class AdvaiCli < Formula
 
   desc "CLI for browser automation, skills, and external CLIs"
   homepage "https://github.com/Advai-X/advai-cli"
-  url "https://files.pythonhosted.org/packages/89/94/d8326155c88e6995f722158407574fccc77a813fb41768d3e69ca09858e2/advai_cli-1.0.9.tar.gz"
-  sha256 "471a30bcfc9f3f1693eea612101b66e740282d3706f9ccafca9fe3af88543468"
+  url "https://files.pythonhosted.org/packages/32/24/f06412429212844c19320cc689e8859d744075a28db2732bf244d5e1a0d5/advai_cli-1.0.10.tar.gz"
+  sha256 "e91db8eba55f8e796c14f11a0482f6d073087ecf4bb332bccd5dd44727acc2ce"
   license "MIT"
 
   depends_on "python@3.14"

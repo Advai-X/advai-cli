@@ -29,3 +29,4 @@ node_modules/
 # --- Local submission notes ---
 HOMEBREW_CORE.md
 HOMEBREW_CORE_PR.md
+artifacts/
