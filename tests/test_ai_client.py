@@ -25,6 +25,7 @@ from advai.kb import (
 )
 from advai.cli_manager import install_github_clis, list_github_repo_clis
 from advai.skills import info_skill, install_skill, update_skill
+from advai.skill_sources.skills_sh import SkillsShSkillProvider
 
 
 class _FakeResponse:
@@ -53,6 +54,26 @@ class _FakeBytesResponse:
 
     def read(self):
         return self._payload
+
+
+class _FakeHeaders:
+    def get_content_charset(self):
+        return "utf-8"
+
+
+class _FakeTextResponse:
+    def __init__(self, payload: str):
+        self._payload = payload
+        self.headers = _FakeHeaders()
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, exc_type, exc, tb):
+        return False
+
+    def read(self):
+        return self._payload.encode("utf-8")
 
 
 class AIClientTests(unittest.TestCase):
@@ -196,6 +217,7 @@ class SkillGithubInstallTests(unittest.TestCase):
 
         self.assertEqual(metadata["name"], "demo-skill")
         self.assertEqual(metadata["version"], "1.2.3")
+        self.assertEqual(metadata["source"]["provider"], "github")
         self.assertEqual(metadata["source"]["type"], "github")
         self.assertEqual(metadata["source"]["ref"], "main")
         self.assertEqual(metadata["source"]["skill"], "demo-skill")
@@ -276,9 +298,263 @@ class SkillGithubInstallTests(unittest.TestCase):
     def test_install_skill_rejects_non_github_input(self):
         with self.assertRaisesRegex(
             RuntimeError,
-            "only supports GitHub repository URLs",
+            "Unable to determine skill source",
         ):
             install_skill("demo-skill")
+
+
+class SkillsShProviderTests(unittest.TestCase):
+    def test_skills_sh_can_handle_url_and_prefixed_spec(self):
+        provider = SkillsShSkillProvider()
+        self.assertTrue(
+            provider.can_handle("https://skills.sh/vercel-labs/skills/find-skills")
+        )
+        self.assertTrue(provider.can_handle("skills.sh:vercel-labs/skills/find-skills"))
+        self.assertTrue(provider.can_handle("skills_sh:vercel-labs/skills/find-skills"))
+        self.assertFalse(provider.can_handle("find-skills"))
+
+    def test_skills_sh_search_extracts_results_from_html(self):
+        provider = SkillsShSkillProvider()
+        html_payload = """
+        <a href="https://www.skills.sh/vercel-labs/skills/find-skills">find-skills</a>
+        <a href="https://www.skills.sh/anthropics/skills/frontend-design">frontend-design</a>
+        """
+        with mock.patch(
+            "advai.skill_sources.skills_sh._fetch_text",
+            return_value=html_payload,
+        ):
+            results = provider.search("design", limit=10)
+
+        self.assertEqual(len(results), 2)
+        self.assertEqual(results[0].provider, "skills_sh")
+        self.assertEqual(
+            results[0].install_spec,
+            "skills.sh:vercel-labs/skills/find-skills",
+        )
+
+    def test_skills_sh_search_prefers_api_when_token_is_set(self):
+        provider = SkillsShSkillProvider()
+        api_payload = {
+            "data": [
+                {
+                    "id": "vercel-labs/skills/find-skills",
+                    "slug": "find-skills",
+                    "name": "Find Skills",
+                    "description": "Discover skills",
+                    "url": "https://skills.sh/vercel-labs/skills/find-skills",
+                }
+            ]
+        }
+        with mock.patch(
+            "advai.skill_sources.skills_sh._skills_sh_api_token",
+            return_value="token",
+        ), mock.patch(
+            "advai.skill_sources.skills_sh._fetch_json",
+            return_value=api_payload,
+        ) as api_mock, mock.patch(
+            "advai.skill_sources.skills_sh._fetch_text"
+        ) as html_mock:
+            results = provider.search("find", limit=10)
+
+        self.assertEqual(len(results), 1)
+        self.assertEqual(results[0].name, "Find Skills")
+        api_mock.assert_called_once()
+        html_mock.assert_not_called()
+
+    def test_skills_sh_search_falls_back_to_html_when_api_fails(self):
+        provider = SkillsShSkillProvider()
+        html_payload = """
+        <a href="https://www.skills.sh/vercel-labs/skills/find-skills">find-skills</a>
+        """
+        with mock.patch(
+            "advai.skill_sources.skills_sh._skills_sh_api_token",
+            return_value="token",
+        ), mock.patch(
+            "advai.skill_sources.skills_sh._fetch_json",
+            side_effect=RuntimeError("authentication_required"),
+        ), mock.patch(
+            "advai.skill_sources.skills_sh._fetch_text",
+            return_value=html_payload,
+        ):
+            results = provider.search("find", limit=10)
+
+        self.assertEqual(len(results), 1)
+        self.assertEqual(results[0].install_spec, "skills.sh:vercel-labs/skills/find-skills")
+
+    def test_skills_sh_resolve_prefers_api_when_token_is_set(self):
+        provider = SkillsShSkillProvider()
+        api_payload = {
+            "sourceType": "github",
+            "source": "vercel-labs/skills",
+            "summary": "Discover and install skills.",
+        }
+        with mock.patch(
+            "advai.skill_sources.skills_sh._skills_sh_api_token",
+            return_value="token",
+        ), mock.patch(
+            "advai.skill_sources.skills_sh._fetch_json",
+            return_value=api_payload,
+        ) as api_mock, mock.patch(
+            "advai.skill_sources.skills_sh._fetch_text"
+        ) as html_mock:
+            resolved = provider.resolve("skills.sh:vercel-labs/skills/find-skills")
+
+        self.assertEqual(resolved.metadata["github_url"], "https://github.com/vercel-labs/skills")
+        self.assertEqual(resolved.metadata["summary"], "Discover and install skills.")
+        api_mock.assert_called_once()
+        html_mock.assert_not_called()
+
+    def test_skills_sh_resolve_supports_bare_name_with_unique_match(self):
+        provider = SkillsShSkillProvider()
+        with mock.patch.object(
+            provider,
+            "search",
+            return_value=[
+                type(
+                    "Result",
+                    (),
+                    {
+                        "name": "find-skills",
+                        "install_spec": "skills.sh:vercel-labs/skills/find-skills",
+                        "remote_id": "vercel-labs/skills/find-skills",
+                    },
+                )()
+            ],
+        ), mock.patch(
+            "advai.skill_sources.skills_sh._skills_sh_api_token",
+            return_value="",
+        ), mock.patch(
+            "advai.skill_sources.skills_sh._fetch_text",
+            return_value="Repository https://github.com/vercel-labs/skills",
+        ):
+            resolved = provider.resolve("find-skills")
+
+        self.assertEqual(resolved.install_spec, "skills.sh:vercel-labs/skills/find-skills")
+        self.assertEqual(resolved.metadata["github_url"], "https://github.com/vercel-labs/skills")
+
+    def test_skills_sh_resolve_rejects_ambiguous_bare_name(self):
+        provider = SkillsShSkillProvider()
+        with mock.patch.object(
+            provider,
+            "search",
+            return_value=[
+                type(
+                    "Result",
+                    (),
+                    {
+                        "name": "find-skills",
+                        "install_spec": "skills.sh:vercel-labs/skills/find-skills",
+                        "remote_id": "vercel-labs/skills/find-skills",
+                    },
+                )(),
+                type(
+                    "Result",
+                    (),
+                    {
+                        "name": "find-skills",
+                        "install_spec": "skills.sh:acme/skills/find-skills",
+                        "remote_id": "acme/skills/find-skills",
+                    },
+                )(),
+            ],
+        ):
+            with self.assertRaisesRegex(RuntimeError, "Multiple skills found on skills.sh"):
+                provider.resolve("find-skills")
+
+    def test_install_skill_from_skills_sh_url_delegates_to_github(self):
+        repo_zip = SkillGithubInstallTests()._build_repo_zip(
+            {
+                "skills/find-skills/skill.json": json.dumps(
+                    {"name": "find-skills", "version": "1.2.3"}
+                ),
+                "skills/find-skills/README.md": "demo skill",
+            }
+        )
+        detail_html = """
+        # find-skills
+        Summary
+        Discover and install skills.
+
+        Repository
+        https://github.com/vercel-labs/skills
+        """
+
+        def fake_urlopen(request, timeout=30):
+            _ = timeout
+            url = request.full_url if hasattr(request, "full_url") else request
+            if url == "https://skills.sh/vercel-labs/skills/find-skills":
+                return _FakeTextResponse(detail_html)
+            if url == "https://api.github.com/repos/vercel-labs/skills":
+                return _FakeResponse({"default_branch": "main"})
+            if url == "https://api.github.com/repos/vercel-labs/skills/zipball/main":
+                return _FakeBytesResponse(repo_zip)
+            raise AssertionError(f"Unexpected URL: {url}")
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            with mock.patch("advai.skills.SKILLS_DIR", temp_dir):
+                with mock.patch("urllib.request.urlopen", side_effect=fake_urlopen):
+                    metadata = install_skill(
+                        "https://skills.sh/vercel-labs/skills/find-skills"
+                    )
+
+        self.assertEqual(metadata["name"], "find-skills")
+        self.assertEqual(metadata["source"]["provider"], "skills_sh")
+        self.assertEqual(
+            metadata["source"]["upstream"]["provider"],
+            "github",
+        )
+        self.assertEqual(metadata["source"]["skill"], "find-skills")
+
+    def test_install_skill_from_skills_sh_name_with_source(self):
+        repo_zip = SkillGithubInstallTests()._build_repo_zip(
+            {
+                "skills/find-skills/skill.json": json.dumps(
+                    {"name": "find-skills", "version": "1.2.3"}
+                ),
+                "skills/find-skills/README.md": "demo skill",
+            }
+        )
+        detail_html = """
+        # find-skills
+        Repository
+        https://github.com/vercel-labs/skills
+        """
+
+        def fake_urlopen(request, timeout=30):
+            _ = timeout
+            url = request.full_url if hasattr(request, "full_url") else request
+            if url == "https://skills.sh/vercel-labs/skills/find-skills":
+                return _FakeTextResponse(detail_html)
+            if url == "https://api.github.com/repos/vercel-labs/skills":
+                return _FakeResponse({"default_branch": "main"})
+            if url == "https://api.github.com/repos/vercel-labs/skills/zipball/main":
+                return _FakeBytesResponse(repo_zip)
+            raise AssertionError(f"Unexpected URL: {url}")
+
+        fake_result = type(
+            "Result",
+            (),
+            {
+                "name": "find-skills",
+                "install_spec": "skills.sh:vercel-labs/skills/find-skills",
+                "remote_id": "vercel-labs/skills/find-skills",
+            },
+        )()
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            with mock.patch("advai.skills.SKILLS_DIR", temp_dir):
+                with mock.patch.object(
+                    SkillsShSkillProvider,
+                    "search",
+                    return_value=[fake_result],
+                ), mock.patch(
+                    "urllib.request.urlopen",
+                    side_effect=fake_urlopen,
+                ):
+                    metadata = install_skill("find-skills", source="skills_sh")
+
+        self.assertEqual(metadata["name"], "find-skills")
+        self.assertEqual(metadata["source"]["provider"], "skills_sh")
 
 
 class ExternalCliGithubInstallTests(unittest.TestCase):
@@ -370,7 +646,7 @@ class SkillCliInstallTests(unittest.TestCase):
 
         self.assertNotEqual(result.exit_code, 0)
         self.assertIn(
-            "skill install currently only supports GitHub repository URLs",
+            "Unable to determine skill source",
             result.output,
         )
 
@@ -415,6 +691,106 @@ class SkillCliInstallTests(unittest.TestCase):
 
         self.assertEqual(result.exit_code, 0)
         self.assertIn("Installation cancelled.", result.output)
+        install_mock.assert_not_called()
+
+    def test_cli_skill_search_prints_results(self):
+        runner = CliRunner()
+        fake_result = mock.Mock()
+        fake_result.name = "find-skills"
+        fake_result.provider = "skills_sh"
+        fake_result.version = None
+        fake_result.description = ""
+        with mock.patch("advai.cli.search_skills", return_value=[fake_result]):
+            result = runner.invoke(cli, ["skill", "search", "find"])
+
+        self.assertEqual(result.exit_code, 0)
+        self.assertIn("Skills:", result.output)
+        self.assertIn("find-skills [skills_sh] unknown", result.output)
+
+    def test_cli_skill_install_supports_skills_sh_name_with_source(self):
+        runner = CliRunner()
+        fake_result = mock.Mock()
+        fake_result.name = "find-skills"
+        fake_result.provider = "skills_sh"
+        fake_result.install_spec = "skills.sh:vercel-labs/skills/find-skills"
+        fake_result.homepage = "https://skills.sh/vercel-labs/skills/find-skills"
+        with mock.patch(
+            "advai.cli.search_skills",
+            return_value=[fake_result],
+        ), mock.patch(
+            "advai.cli.install_skill",
+            return_value={"name": "find-skills"},
+        ) as install_mock:
+            result = runner.invoke(
+                cli,
+                ["skill", "install", "find-skills", "--source", "skills_sh"],
+            )
+
+        self.assertEqual(result.exit_code, 0)
+        self.assertIn("Skill 'find-skills' installed successfully", result.output)
+        install_mock.assert_called_once()
+
+    def test_cli_skill_install_prompts_for_skills_sh_search_choice(self):
+        runner = CliRunner()
+        result_a = mock.Mock()
+        result_a.name = "find-skills"
+        result_a.provider = "skills_sh"
+        result_a.install_spec = "skills.sh:vercel-labs/skills/find-skills"
+        result_a.homepage = "https://skills.sh/vercel-labs/skills/find-skills"
+        result_b = mock.Mock()
+        result_b.name = "find-skills"
+        result_b.provider = "skills_sh"
+        result_b.install_spec = "skills.sh:acme/skills/find-skills"
+        result_b.homepage = "https://skills.sh/acme/skills/find-skills"
+        with mock.patch(
+            "advai.cli.search_skills",
+            return_value=[result_a, result_b],
+        ), mock.patch(
+            "advai.cli.install_skill",
+            return_value={"name": "find-skills"},
+        ) as install_mock:
+            result = runner.invoke(
+                cli,
+                ["skill", "install", "find-skills", "--source", "skills_sh"],
+                input="2\n",
+            )
+
+        self.assertEqual(result.exit_code, 0)
+        self.assertIn("Search results:", result.output)
+        self.assertIn("Choose a skill number", result.output)
+        install_mock.assert_called_once()
+        self.assertEqual(
+            install_mock.call_args.kwargs["source"],
+            "skills_sh",
+        )
+        self.assertEqual(
+            install_mock.call_args.args[0],
+            "skills.sh:acme/skills/find-skills",
+        )
+
+    def test_cli_skill_install_skills_sh_yes_rejects_ambiguous_results(self):
+        runner = CliRunner()
+        result_a = mock.Mock()
+        result_a.name = "find-skills"
+        result_a.provider = "skills_sh"
+        result_a.install_spec = "skills.sh:vercel-labs/skills/find-skills"
+        result_a.homepage = "https://skills.sh/vercel-labs/skills/find-skills"
+        result_b = mock.Mock()
+        result_b.name = "find-skills"
+        result_b.provider = "skills_sh"
+        result_b.install_spec = "skills.sh:acme/skills/find-skills"
+        result_b.homepage = "https://skills.sh/acme/skills/find-skills"
+        with mock.patch(
+            "advai.cli.search_skills",
+            return_value=[result_a, result_b],
+        ), mock.patch("advai.cli.install_skill") as install_mock:
+            result = runner.invoke(
+                cli,
+                ["skill", "install", "find-skills", "--source", "skills_sh", "--yes"],
+            )
+
+        self.assertNotEqual(result.exit_code, 0)
+        self.assertIn("Multiple skills found for 'find-skills'", result.output)
         install_mock.assert_not_called()
 
     def test_cli_install_github_repo_prompts_to_install_all_clis(self):

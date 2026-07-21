@@ -9,6 +9,7 @@ import urllib.request
 import zipfile
 from datetime import datetime, timezone
 
+from advai.skill_sources.registry import detect_provider_from_spec, get_provider, search_providers
 from advai.skill_platforms import get_skill_platform, resolve_platform_target
 
 SKILLS_DIR = os.path.expanduser("~/.advai/skills")
@@ -300,12 +301,14 @@ def _install_skill_from_directory(
     shutil.copytree(skill_root, target_path)
     merged_meta = dict(repo_meta)
     merged_meta["name"] = skill_name
-    merged_meta["version"] = str(merged_meta.get("version") or "unknown")
+    merged_meta["version"] = str(
+        merged_meta.get("version") or source.get("resolved_version") or "unknown"
+    )
     merged_meta["installed_at"] = _utc_now()
     merged_meta["status"] = "installed"
     merged_meta["source"] = {
         **source,
-        "skill": source_skill,
+        "skill": source.get("skill") or source_skill,
     }
     merged_meta = _preserve_sync_targets(existing_meta, merged_meta)
     _write_skill_metadata(skill_name, merged_meta)
@@ -313,16 +316,10 @@ def _install_skill_from_directory(
 
 
 def list_github_repo_skills(spec: str) -> list[str]:
-    parsed = _parse_github_spec(spec)
-    if parsed is None:
-        raise RuntimeError("Unsupported GitHub URL")
-
-    repo_root, _source = _extract_github_repo(parsed)
-    cleanup_root = os.path.dirname(repo_root)
-    try:
-        return _list_repo_skills(repo_root)
-    finally:
-        shutil.rmtree(cleanup_root, ignore_errors=True)
+    provider = get_provider("github")
+    if provider is None:
+        raise RuntimeError("GitHub skill provider is not available")
+    return provider.list_repo_skills(spec)
 
 
 def install_github_skills(
@@ -330,45 +327,15 @@ def install_github_skills(
     force: bool = False,
     selected_skills: list[str] | None = None,
 ) -> list[dict]:
-    parsed = _parse_github_spec(spec)
-    if parsed is None:
-        raise RuntimeError("Unsupported GitHub URL")
-
-    repo_root, source = _extract_github_repo(parsed)
-    cleanup_root = os.path.dirname(repo_root)
-    try:
-        available_skills = _list_repo_skills(repo_root)
-        if not available_skills:
-            raise RuntimeError("GitHub repository skills directory is empty")
-
-        if selected_skills:
-            unknown = [name for name in selected_skills if name not in available_skills]
-            if unknown:
-                available = ", ".join(available_skills)
-                missing = ", ".join(unknown)
-                raise RuntimeError(
-                    f"Skill '{missing}' not found in repository skills directory. "
-                    f"Available skills: {available}"
-                )
-            targets = selected_skills
-        else:
-            targets = available_skills
-
-        installed = []
-        skills_root = os.path.join(repo_root, "skills")
-        for source_skill in targets:
-            skill_root = os.path.join(skills_root, source_skill)
-            installed.append(
-                _install_skill_from_directory(
-                    skill_root,
-                    source_skill,
-                    source,
-                    force=force,
-                )
-            )
-        return installed
-    finally:
-        shutil.rmtree(cleanup_root, ignore_errors=True)
+    provider = get_provider("github")
+    if provider is None:
+        raise RuntimeError("GitHub skill provider is not available")
+    return provider.install_many(
+        spec,
+        force=force,
+        selected_skills=selected_skills,
+        install_directory=_install_skill_from_directory,
+    )
 
 
 def _install_github_skill(
@@ -376,29 +343,55 @@ def _install_github_skill(
     force: bool = False,
     selected_skill: str | None = None,
 ) -> dict:
-    parsed = _parse_github_spec(spec)
-    if parsed is None:
-        raise RuntimeError("Unsupported GitHub URL")
+    provider = get_provider("github")
+    if provider is None:
+        raise RuntimeError("GitHub skill provider is not available")
+    resolved = provider.resolve(spec, selected_skill=selected_skill)
+    return provider.install(
+        resolved,
+        force=force,
+        install_directory=_install_skill_from_directory,
+    )
 
-    repo_root, source = _extract_github_repo(parsed)
-    cleanup_root = os.path.dirname(repo_root)
-    try:
-        source_skill, skill_root = _resolve_repo_skill(repo_root, selected_skill)
-        return _install_skill_from_directory(
-            skill_root,
-            source_skill,
-            source,
-            force=force,
+
+def rewrite_skill_source(skill_name: str, source: dict) -> dict:
+    metadata = info_skill(skill_name)
+    if metadata is None:
+        raise FileNotFoundError(skill_name)
+    metadata["source"] = source
+    _write_skill_metadata(skill_name, metadata)
+    return metadata
+
+
+def search_skills(query: str, source: str | None = None, limit: int = 20) -> list:
+    return search_providers(query, source=source, limit=limit)
+
+
+def install_skill(
+    skill_name: str,
+    force: bool = False,
+    selected_skill: str | None = None,
+    source: str | None = None,
+    version: str | None = None,
+) -> dict:
+    provider = get_provider(source) if source else detect_provider_from_spec(skill_name)
+    if provider is None:
+        raise RuntimeError(
+            "Unable to determine skill source. Use --source or a provider-prefixed spec."
         )
-    finally:
-        shutil.rmtree(cleanup_root, ignore_errors=True)
-
-
-def install_skill(skill_name: str, force: bool = False, selected_skill: str | None = None) -> dict:
-    """Install a skill from a GitHub repository URL."""
-    if not _looks_like_github_url(skill_name):
-        raise RuntimeError("skill install currently only supports GitHub repository URLs")
-    return _install_github_skill(skill_name, force=force, selected_skill=selected_skill)
+    resolved = provider.resolve(
+        skill_name,
+        selected_skill=selected_skill,
+        version=version,
+    )
+    installed = provider.install(
+        resolved,
+        force=force,
+        install_directory=_install_skill_from_directory,
+    )
+    if installed.get("source"):
+        installed = rewrite_skill_source(installed["name"], installed["source"])
+    return installed
 
 
 def uninstall_skill(skill_name: str) -> None:
@@ -418,29 +411,49 @@ def list_skills():
     )
 
 
+def _normalize_provider_name(source: dict) -> str | None:
+    provider = str(source.get("provider") or "").strip().lower()
+    if provider:
+        return provider
+
+    source_type = str(source.get("type") or "").strip().lower()
+    install_spec = str(source.get("install_spec") or "").strip()
+    url = str(source.get("url") or "").strip()
+    if source_type == "github":
+        return "github"
+    if install_spec.startswith("https://github.com/") or url.startswith("https://github.com/"):
+        return "github"
+    return None
+
+
 def update_skill(skill_name=None, selected_skill: str | None = None):
-    """Update one or all installed skills, including GitHub-backed skills."""
+    """Update one or all installed skills."""
     targets = [skill_name] if skill_name else list_skills()
     updated = []
     for target in targets:
         try:
-            if _looks_like_github_url(target):
-                meta = install_skill(target, force=True, selected_skill=selected_skill)
-                updated.append(meta["name"])
-                continue
-
             if not os.path.isdir(_skill_path(target)):
                 continue
 
             existing_meta = info_skill(target) or {}
             source = existing_meta.get("source") or {}
-            install_spec = source.get("install_spec") or target
-            source_skill = source.get("skill")
-            meta = install_skill(
-                install_spec,
+            provider_name = _normalize_provider_name(source)
+            if not provider_name:
+                continue
+
+            provider = get_provider(provider_name)
+            if provider is None:
+                continue
+            if selected_skill and provider_name != "github":
+                raise RuntimeError("--skill is only supported for GitHub repository installs")
+
+            meta = provider.update(
+                existing_meta,
                 force=True,
-                selected_skill=selected_skill or source_skill,
+                install_directory=_install_skill_from_directory,
             )
+            if meta.get("source"):
+                meta = rewrite_skill_source(meta["name"], meta["source"])
             resync_skill_targets(meta["name"])
             updated.append(meta["name"])
         except Exception:

@@ -296,6 +296,7 @@ advai tui --timeout 180
 | `ADVAI_MODELS` | No | built-in model list | Comma-separated models shown by the interactive `/model` picker |
 | `ADVAI_SYSTEM_PROMPT` | No | built-in prompt | Initial system prompt |
 | `ADVAI_TIMEOUT` | No | `120` | Request timeout in seconds |
+| `ADVAI_SKILLS_SH_TOKEN` | No | none | Optional token for `skills.sh` API-first skill search/detail lookups; falls back to HTML when unset or unavailable |
 | `OPENAI_API_KEY` | Yes* | none | Fallback if `ADVAI_API_KEY` is not set |
 | `OPENAI_BASE_URL` | No | none | Fallback if `ADVAI_BASE_URL` is not set |
 | `OPENAI_MODEL` | No | none | Fallback if `ADVAI_MODEL` is not set |
@@ -325,11 +326,15 @@ Skills are stored locally under `~/.advai/skills`.
 
 ```bash
 advai skill list
+advai skill search design --source skills_sh
 advai skill platform list
 advai skill info demo-skill
 advai skill install https://github.com/your-org/skill-repo
 advai skill install https://github.com/your-org/skill-repo --skill demo-skill
 advai skill install https://github.com/your-org/skill-repo --skill demo-skill --platform cursor
+advai skill install find-skills --source skills_sh
+advai skill install skills.sh:vercel-labs/skills/find-skills
+advai skill install https://skills.sh/vercel-labs/skills/find-skills
 advai skill sync demo-skill --platform trae
 advai skill sync demo-skill --platform omp_agent --project-dir /path/to/repo
 advai skill unsync demo-skill --platform cursor
@@ -414,11 +419,15 @@ Current scope:
 - GitHub installs read from the repository root `skills/` directory instead of copying the whole repo
 - If the repo `skills/` directory contains one skill, `advai` installs it automatically
 - If the repo `skills/` directory contains multiple skills, `advai` prompts whether to install all of them; use `--skill <name>` to choose one explicitly
-- `advai skill update <name>` reuses the saved GitHub repo URL and selected skill directory when the installed skill came from GitHub
-- `advai skill install` and `advai cli install` currently support GitHub repository URLs only
+- `advai skill search <query>` can discover skills from provider-backed sources such as `skills.sh`
+- `advai skill update <name>` reuses the saved install source metadata, including provider-backed sources such as GitHub and `skills.sh`
+- `advai skill install` supports GitHub repository URLs, provider-prefixed specs such as `skills.sh:<owner>/<repo>/<skill>`, and `skills.sh` skill page URLs
 - Built-in platform adapters cover common coding and lobster-style agents, and custom platforms can be added locally
 - `advai skill sync` supports `symlink` and `copy` modes for writing skills into platform-specific directories
 - `advai skill install <github-url> --platform <key>` installs locally first, then syncs into each selected platform
+- `advai skill install <name> --source skills_sh` searches `skills.sh`; interactive terminals can choose from multiple matches, while `--yes` requires an unambiguous result
+- `skills.sh` search and detail lookups prefer the official API when `ADVAI_SKILLS_SH_TOKEN` (or `SKILLS_SH_TOKEN` / `VERCEL_OIDC_TOKEN`) is set, and fall back to public HTML pages otherwise
+- `skills.sh` installs currently resolve to the underlying GitHub repository and selected skill slug before local installation
 - `advai skill uninstall <name>` removes the local skill and cleans up any synced platform targets recorded in metadata
 - Platforms with project-local skills directories can be targeted with `--project-dir`
 

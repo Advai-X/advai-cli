@@ -52,6 +52,7 @@ from advai.skills import (
     list_github_repo_skills,
     list_skill_sync_targets,
     list_skills,
+    search_skills,
     sync_skill_to_platform,
     uninstall_skill,
     unsync_skill_from_platform,
@@ -170,26 +171,76 @@ def _sync_installed_skill_targets(skill_name, platforms, sync_mode, project_dir,
     return synced
 
 
+def _split_provider_prefixed_spec(spec):
+    value = str(spec or "").strip()
+    if "://" in value or ":" not in value:
+        return None, value
+    provider, name = value.split(":", 1)
+    if not provider or not name:
+        return None, value
+    return provider.strip(), name.strip()
+
+
+def _should_prompt_skills_sh_search(source, spec):
+    normalized_source = str(source or "").strip().lower()
+    value = str(spec or "").strip()
+    return normalized_source in {"skills_sh", "skills.sh"} and "://" not in value and "/" not in value
+
+
+def _choose_skill_search_result(query, source, yes):
+    results = search_skills(query, source=source, limit=10)
+    if not results:
+        raise RuntimeError(f"No skills found for '{query}'")
+    if len(results) == 1:
+        return results[0]
+    if yes:
+        choices = ", ".join(item.install_spec for item in results[:5])
+        raise RuntimeError(
+            f"Multiple skills found for '{query}'. Use a full skills.sh spec or URL: {choices}"
+        )
+
+    click.echo("Search results:")
+    for index, item in enumerate(results, start=1):
+        label = item.homepage or item.install_spec
+        click.echo(f"  {index}. {item.name} [{item.provider}] - {label}")
+
+    choice = click.prompt(
+        f"Choose a skill number (1-{len(results)})",
+        type=click.IntRange(1, len(results)),
+    )
+    return results[choice - 1]
+
+
 def _skill_install(
     skill_name,
     force,
     selected_skill=None,
+    source=None,
+    version=None,
+    yes=False,
     platforms=(),
     sync_mode="symlink",
     project_dir=None,
 ):
     try:
-        if not skill_name.startswith("https://github.com/"):
-            raise click.ClickException(
-                "skill install currently only supports GitHub repository URLs"
-            )
-        if skill_name.startswith("https://github.com/") and not selected_skill:
-            available_skills = list_github_repo_skills(skill_name)
+        prefixed_source, normalized_spec = _split_provider_prefixed_spec(skill_name)
+        effective_source = source or prefixed_source
+        effective_spec = normalized_spec if prefixed_source else skill_name
+
+        if _should_prompt_skills_sh_search(effective_source, effective_spec):
+            chosen = _choose_skill_search_result(effective_spec, effective_source, yes)
+            effective_spec = chosen.install_spec
+
+        if (
+            (effective_source in {None, "github"} and effective_spec.startswith("https://github.com/"))
+            and not selected_skill
+        ):
+            available_skills = list_github_repo_skills(effective_spec)
             if len(available_skills) > 1:
                 click.echo("Repository skills:")
                 for name in available_skills:
                     click.echo(f"  - {name}")
-                confirmed = click.confirm(
+                confirmed = yes or click.confirm(
                     "Multiple skills found. Install all of them?",
                     default=False,
                 )
@@ -197,7 +248,7 @@ def _skill_install(
                     click.echo("Installation cancelled.")
                     return
 
-                installed = install_github_skills(skill_name, force=force)
+                installed = install_github_skills(effective_spec, force=force)
                 for metadata in installed:
                     installed_name = metadata.get("name", "unknown")
                     _sync_installed_skill_targets(
@@ -212,8 +263,14 @@ def _skill_install(
                     )
                 return
 
-        metadata = install_skill(skill_name, force=force, selected_skill=selected_skill)
-        installed_name = metadata.get("name", skill_name)
+        metadata = install_skill(
+            effective_spec,
+            force=force,
+            selected_skill=selected_skill,
+            source=effective_source,
+            version=version,
+        )
+        installed_name = metadata.get("name", effective_spec)
         _sync_installed_skill_targets(
             installed_name,
             platforms,
@@ -226,6 +283,32 @@ def _skill_install(
         click.echo(f"⚠️  Skill '{skill_name}' already exists, use --force to overwrite")
     except Exception as e:
         click.echo(f"❌ Installation failed: {e}", err=True)
+        sys.exit(1)
+
+
+def _skill_search(query, source=None, limit=20, as_json=False):
+    try:
+        results = search_skills(query, source=source, limit=limit)
+        if as_json:
+            click.echo(
+                json.dumps(
+                    [item.__dict__ for item in results],
+                    ensure_ascii=False,
+                    indent=2,
+                )
+            )
+            return
+        if not results:
+            click.echo("(no Skills found)")
+            return
+        click.echo("Skills:")
+        for index, item in enumerate(results, start=1):
+            version = item.version or "unknown"
+            click.echo(f"  {index}. {item.name} [{item.provider}] {version}")
+            if item.description:
+                click.echo(f"     {item.description}")
+    except Exception as e:
+        click.echo(f"❌ Search failed: {e}", err=True)
         sys.exit(1)
 
 
@@ -1036,6 +1119,9 @@ def skill_admin():
 @click.argument("skill_name")
 @click.option("--force", is_flag=True, help="Force reinstall (overwrite existing)")
 @click.option("--skill", "selected_skill", default=None, help="Select one skill from a GitHub repo's skills directory")
+@click.option("--source", default=None, help="Install from a specific skill source provider")
+@click.option("--version", default=None, help="Install a specific version when supported")
+@click.option("--yes", is_flag=True, help="Skip interactive confirmation when possible")
 @click.option(
     "--platform",
     "platforms",
@@ -1055,12 +1141,25 @@ def skill_admin():
     default=None,
     help="Use a project-local platform skills path when the platform supports it",
 )
-def skill_install_cmd(skill_name, force, selected_skill, platforms, sync_mode, project_dir):
+def skill_install_cmd(
+    skill_name,
+    force,
+    selected_skill,
+    source,
+    version,
+    yes,
+    platforms,
+    sync_mode,
+    project_dir,
+):
     """Install a Skill."""
     _skill_install(
         skill_name,
         force,
         selected_skill=selected_skill,
+        source=source,
+        version=version,
+        yes=yes,
         platforms=platforms,
         sync_mode=sync_mode.lower(),
         project_dir=project_dir,
@@ -1078,6 +1177,16 @@ def skill_uninstall_cmd(skill_name):
 def skill_list_cmd():
     """List locally installed Skills."""
     _skill_list()
+
+
+@skill_admin.command(name="search")
+@click.argument("query")
+@click.option("--source", default=None, help="Limit search to one skill source")
+@click.option("--limit", default=20, show_default=True, type=int)
+@click.option("--json", "as_json", is_flag=True, help="Print search results as JSON")
+def skill_search_cmd(query, source, limit, as_json):
+    """Search installable Skills."""
+    _skill_search(query, source=source, limit=limit, as_json=as_json)
 
 
 @skill_admin.command(name="update")

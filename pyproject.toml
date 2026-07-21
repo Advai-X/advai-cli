@@ -32,4 +32,4 @@ Issues = "https://github.com/Advai-X/advai-cli/issues"
 advai = "advai.cli:cli"
 
 [tool.setuptools]
-packages = ["advai"]
+packages = ["advai", "advai.skill_sources"]
