@@ -19,7 +19,9 @@ SKILL_LINK_PATTERN = re.compile(
     r"(?P<owner>[^/]+)/(?P<repo>[^/]+)/(?P<skill>[^/?#]+?)(?=[\"')\s<])"
 )
 GITHUB_REPO_LINK_PATTERN = re.compile(
-    r"https?://github\.com/(?P<owner>[^/]+)/(?P<repo>[^/\"'#?]+)"
+    r"https?://github\.com/"
+    r"(?P<owner>[^/\s<>'\"`()#?]+)/"
+    r"(?P<repo>[^/\s<>'\"`()#?]+?)(?:\.git)?(?=[\s<>'\"`()#?]|$)"
 )
 SUMMARY_PATTERN = re.compile(
     r"Summary\s+(?P<summary>.+?)(?:\n\s*\n|\n#|\nSKILL\.md|\nRelated skills)",

@@ -594,6 +594,45 @@ class SkillsShProviderTests(unittest.TestCase):
         self.assertEqual(metadata["name"], "find-skills")
         self.assertEqual(metadata["source"]["provider"], "skills_sh")
 
+    def test_install_skill_from_skills_sh_html_command_snippet_ignores_skill_flag(self):
+        repo_zip = SkillGithubInstallTests()._build_repo_zip(
+            {
+                "skills/find-skills/skill.json": json.dumps(
+                    {"name": "find-skills", "version": "1.2.3"}
+                ),
+                "skills/find-skills/README.md": "demo skill",
+            }
+        )
+        detail_html = """
+        <h1>find-skills</h1>
+        <p>Install with:</p>
+        <code>advai skill install https://github.com/vercel-labs/skills --skill find-skills</code>
+        """
+
+        def fake_urlopen(request, timeout=30):
+            _ = timeout
+            url = request.full_url if hasattr(request, "full_url") else request
+            if url == "https://skills.sh/vercel-labs/skills/find-skills":
+                return _FakeTextResponse(detail_html)
+            if url == "https://api.github.com/repos/vercel-labs/skills":
+                return _FakeResponse({"default_branch": "main"})
+            if url == "https://api.github.com/repos/vercel-labs/skills/zipball/main":
+                return _FakeBytesResponse(repo_zip)
+            raise AssertionError(f"Unexpected URL: {url}")
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            with mock.patch("advai.skills.SKILLS_DIR", temp_dir):
+                with mock.patch("urllib.request.urlopen", side_effect=fake_urlopen):
+                    metadata = install_skill(
+                        "https://skills.sh/vercel-labs/skills/find-skills"
+                    )
+
+        self.assertEqual(metadata["name"], "find-skills")
+        self.assertEqual(
+            metadata["source"]["upstream"]["url"],
+            "https://github.com/vercel-labs/skills",
+        )
+
 
 class ExternalCliGithubInstallTests(unittest.TestCase):
     def _build_repo_zip(self, files: dict[str, str]) -> bytes:
