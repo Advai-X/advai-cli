@@ -320,6 +320,12 @@ class SkillsShProviderTests(unittest.TestCase):
         <a href="https://www.skills.sh/anthropics/skills/frontend-design">frontend-design</a>
         """
         with mock.patch(
+            "advai.skill_sources.skills_sh._skills_sh_api_token",
+            return_value="",
+        ), mock.patch(
+            "advai.skill_sources.skills_sh._fetch_bytes",
+            side_effect=RuntimeError("public search unavailable"),
+        ), mock.patch(
             "advai.skill_sources.skills_sh._fetch_text",
             return_value=html_payload,
         ):
