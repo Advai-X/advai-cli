@@ -373,6 +373,9 @@ class SkillsShProviderTests(unittest.TestCase):
             "advai.skill_sources.skills_sh._fetch_json",
             side_effect=RuntimeError("authentication_required"),
         ), mock.patch(
+            "advai.skill_sources.skills_sh._fetch_bytes",
+            side_effect=RuntimeError("public_search_unavailable"),
+        ), mock.patch(
             "advai.skill_sources.skills_sh._fetch_text",
             return_value=html_payload,
         ):
@@ -380,6 +383,35 @@ class SkillsShProviderTests(unittest.TestCase):
 
         self.assertEqual(len(results), 1)
         self.assertEqual(results[0].install_spec, "skills.sh:vercel-labs/skills/find-skills")
+
+    def test_skills_sh_search_uses_public_search_api_without_token(self):
+        provider = SkillsShSkillProvider()
+        public_payload = {
+            "skills": [
+                {
+                    "id": "vercel-labs/skills/find-skills",
+                    "skillId": "find-skills",
+                    "name": "find-skills",
+                    "source": "vercel-labs/skills",
+                }
+            ]
+        }
+        with mock.patch(
+            "advai.skill_sources.skills_sh._skills_sh_api_token",
+            return_value="",
+        ), mock.patch(
+            "advai.skill_sources.skills_sh._fetch_bytes",
+            return_value=json.dumps(public_payload).encode("utf-8"),
+        ) as fetch_mock, mock.patch(
+            "advai.skill_sources.skills_sh._fetch_text"
+        ) as html_mock:
+            results = provider.search("find", limit=10)
+
+        self.assertEqual(len(results), 1)
+        self.assertEqual(results[0].name, "find-skills")
+        self.assertEqual(results[0].homepage, "https://skills.sh/vercel-labs/skills/find-skills")
+        fetch_mock.assert_called_once()
+        html_mock.assert_not_called()
 
     def test_skills_sh_resolve_prefers_api_when_token_is_set(self):
         provider = SkillsShSkillProvider()
@@ -699,13 +731,18 @@ class SkillCliInstallTests(unittest.TestCase):
         fake_result.name = "find-skills"
         fake_result.provider = "skills_sh"
         fake_result.version = None
+        fake_result.homepage = "https://skills.sh/vercel-labs/skills/find-skills"
+        fake_result.install_spec = "skills.sh:vercel-labs/skills/find-skills"
         fake_result.description = ""
         with mock.patch("advai.cli.search_skills", return_value=[fake_result]):
             result = runner.invoke(cli, ["skill", "search", "find"])
 
         self.assertEqual(result.exit_code, 0)
         self.assertIn("Skills:", result.output)
-        self.assertIn("find-skills [skills_sh] unknown", result.output)
+        self.assertIn(
+            "find-skills [skills_sh] - https://skills.sh/vercel-labs/skills/find-skills",
+            result.output,
+        )
 
     def test_cli_skill_install_supports_skills_sh_name_with_source(self):
         runner = CliRunner()

@@ -50,6 +50,11 @@ class SkillsShSkillProvider:
             except RuntimeError:
                 pass
 
+        try:
+            return _search_via_public_api(term, limit=limit)
+        except RuntimeError:
+            pass
+
         return _search_via_html(term, limit=limit)
 
     def resolve(
@@ -280,6 +285,47 @@ def _search_via_api(query: str, limit: int, token: str) -> list[SkillSearchResul
                 remote_id=remote_id,
                 description=str(item.get("description") or "").strip(),
                 homepage=str(item.get("url") or f"https://skills.sh/{remote_id}").strip(),
+                exact=slug.lower() == query.lower()
+                or str(item.get("name") or "").strip().lower() == query.lower(),
+                raw=item,
+            )
+        )
+    return results
+
+
+def _search_via_public_api(query: str, limit: int) -> list[SkillSearchResult]:
+    url = f"https://skills.sh/api/search?q={urllib.parse.quote(query)}&limit={limit}"
+    try:
+        payload = _fetch_bytes(
+            url,
+            headers={"Accept": "application/json"},
+        )
+    except RuntimeError as exc:
+        raise RuntimeError(f"skills.sh public search failed: {exc}") from exc
+    try:
+        data = json.loads(payload.decode("utf-8"))
+    except json.JSONDecodeError as exc:
+        raise RuntimeError("skills.sh public search returned invalid JSON") from exc
+
+    results = []
+    for item in data.get("skills") or []:
+        remote_id = str(item.get("id") or "").strip()
+        if not remote_id:
+            source = str(item.get("source") or "").strip()
+            skill_id = str(item.get("skillId") or item.get("name") or "").strip()
+            remote_id = "/".join(part for part in (source, skill_id) if part)
+        if not remote_id:
+            continue
+
+        slug = str(item.get("skillId") or item.get("name") or remote_id.rsplit("/", 1)[-1]).strip()
+        results.append(
+            SkillSearchResult(
+                provider="skills_sh",
+                name=str(item.get("name") or slug).strip() or slug,
+                install_spec=f"skills.sh:{remote_id}",
+                remote_id=remote_id,
+                description=str(item.get("description") or "").strip(),
+                homepage=f"https://skills.sh/{remote_id}",
                 exact=slug.lower() == query.lower()
                 or str(item.get("name") or "").strip().lower() == query.lower(),
                 raw=item,

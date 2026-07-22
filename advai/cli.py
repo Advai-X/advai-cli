@@ -303,8 +303,12 @@ def _skill_search(query, source=None, limit=20, as_json=False):
             return
         click.echo("Skills:")
         for index, item in enumerate(results, start=1):
-            version = item.version or "unknown"
-            click.echo(f"  {index}. {item.name} [{item.provider}] {version}")
+            line = f"  {index}. {item.name} [{item.provider}]"
+            if item.version:
+                line = f"{line} {item.version}"
+            elif item.homepage or item.install_spec:
+                line = f"{line} - {item.homepage or item.install_spec}"
+            click.echo(line)
             if item.description:
                 click.echo(f"     {item.description}")
     except Exception as e:
