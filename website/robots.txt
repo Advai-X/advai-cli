@@ -1,0 +1,4 @@
+User-agent: *
+Allow: /
+
+Sitemap: https://advai-x.github.io/advai-cli/sitemap.xml

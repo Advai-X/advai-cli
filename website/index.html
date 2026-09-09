@@ -1,0 +1,243 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta
+      name="description"
+      content="advai-cli is a local-first command line for agent skills, browser automation, knowledge bases, external CLIs, and terminal AI chat."
+    />
+    <meta name="theme-color" content="#11140f" />
+    <meta property="og:title" content="advai-cli" />
+    <meta
+      property="og:description"
+      content="One local-first CLI for agent skills, browser automation, knowledge bases, external tools, and terminal AI chat."
+    />
+    <meta property="og:type" content="website" />
+    <meta property="og:image" content="https://advai-x.github.io/advai-cli/assets/hero.png" />
+    <meta property="og:url" content="https://advai-x.github.io/advai-cli/" />
+    <link rel="canonical" href="https://advai-x.github.io/advai-cli/" />
+    <title>advai-cli | Local-first agent tooling</title>
+    <link rel="stylesheet" href="styles.css" />
+    <script src="main.js" defer></script>
+  </head>
+  <body>
+    <a class="skip-link" href="#main" data-i18n="skip">Skip to content</a>
+
+    <header class="site-header" aria-label="Primary navigation" data-i18n-aria="navLabel">
+      <a class="brand" href="#top" aria-label="advai-cli home">
+        <span class="brand-mark" aria-hidden="true">&gt;_</span>
+        <span>advai-cli</span>
+      </a>
+      <nav class="nav-links" aria-label="Page sections" data-i18n-aria="sectionNavLabel">
+        <a href="#capabilities" data-i18n="navCapabilities">Capabilities</a>
+        <a href="#install" data-i18n="navInstall">Install</a>
+        <a href="#quickstart" data-i18n="navQuickstart">Quick start</a>
+        <a href="https://github.com/Advai-X/advai-cli" target="_blank" rel="noreferrer">GitHub</a>
+      </nav>
+      <div class="language-switch" role="group" aria-label="Language" data-i18n-aria="languageLabel">
+        <button type="button" data-language="en" aria-pressed="true">EN</button>
+        <button type="button" data-language="zh" aria-pressed="false">中文</button>
+      </div>
+    </header>
+
+    <main id="main">
+      <section class="hero" id="top">
+        <div class="hero-inner">
+          <div class="hero-copy">
+            <p class="eyebrow" data-i18n="heroEyebrow">Local-first agent tooling</p>
+            <h1>advai-cli</h1>
+            <p class="hero-summary" data-i18n="heroSummary">
+              One command line for agent skills, browser automation, knowledge bases, external tools, and terminal AI chat.
+            </p>
+            <div class="hero-actions">
+              <a class="button button-primary" href="#install" data-i18n="installNow">Install now</a>
+              <a
+                class="button button-secondary"
+                href="https://github.com/Advai-X/advai-cli"
+                target="_blank"
+                rel="noreferrer"
+                data-i18n="viewSource"
+              >View source</a>
+            </div>
+            <p class="hero-meta">
+              <span data-i18n="openSource">Open source</span>
+              <span aria-hidden="true">/</span>
+              <span>MIT</span>
+              <span aria-hidden="true">/</span>
+              <span>macOS · Linux · Windows</span>
+            </p>
+          </div>
+
+          <div class="terminal-scene" aria-label="advai-cli terminal preview" data-i18n-aria="terminalPreviewLabel">
+            <div class="terminal-bar">
+              <span class="terminal-dot"></span>
+              <span class="terminal-dot"></span>
+              <span class="terminal-dot"></span>
+              <span class="terminal-title">advai — zsh</span>
+            </div>
+            <div class="terminal-body">
+              <p><span class="prompt">$</span> advai info</p>
+              <p class="terminal-muted" data-i18n="terminalRuntime">Runtime ready · local state ~/.advai</p>
+              <p><span class="prompt">$</span> advai skill list</p>
+              <p class="terminal-result">design-taste-frontend&nbsp;&nbsp; <span data-i18n="synced">synced</span></p>
+              <p class="terminal-result">advai-browser&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp; <span data-i18n="installed">installed</span></p>
+              <p><span class="prompt">$</span> advai browser doctor</p>
+              <p class="terminal-muted" data-i18n="terminalBrowser">Browser bridge connected</p>
+              <p class="terminal-cursor"><span class="prompt">$</span> <span aria-hidden="true">▋</span></p>
+            </div>
+          </div>
+        </div>
+        <a class="hero-next" href="#install" aria-label="Continue to installation" data-i18n-aria="continueLabel">
+          <span data-i18n="availableVia">Available via PyPI, Homebrew, and npm</span>
+          <span aria-hidden="true">↓</span>
+        </a>
+      </section>
+
+      <section class="install-section" id="install">
+        <div class="section-heading">
+          <p class="section-index" data-i18n="distributionIndex">01 / DISTRIBUTION</p>
+          <h2 data-i18n="installHeading">Install it your way.</h2>
+          <p data-i18n="installLead">Three official channels. The same <code>advai</code> command.</p>
+        </div>
+
+        <div class="install-methods">
+          <article class="install-method">
+            <div class="method-heading">
+              <span class="method-number">01</span>
+              <div>
+                <h3>PyPI</h3>
+                <p data-i18n="pypiAudience">For Python environments</p>
+              </div>
+            </div>
+            <div class="command-line">
+              <code>pip install advai-cli</code>
+              <button type="button" class="copy-button" data-copy="pip install advai-cli" data-i18n="copy">Copy</button>
+            </div>
+            <a href="https://pypi.org/project/advai-cli/" target="_blank" rel="noreferrer" data-i18n="packageDetails">Package details ↗</a>
+          </article>
+
+          <article class="install-method featured-method">
+            <div class="method-heading">
+              <span class="method-number">02</span>
+              <div>
+                <h3>Homebrew</h3>
+                <p data-i18n="brewAudience">For macOS and Linux</p>
+              </div>
+            </div>
+            <div class="command-line">
+              <code>brew install advai-cli</code>
+              <button type="button" class="copy-button" data-copy="brew install advai-cli" data-i18n="copy">Copy</button>
+            </div>
+            <a href="https://formulae.brew.sh/formula/advai-cli" target="_blank" rel="noreferrer" data-i18n="formulaDetails">Formula details ↗</a>
+          </article>
+
+          <article class="install-method">
+            <div class="method-heading">
+              <span class="method-number">03</span>
+              <div>
+                <h3>npm</h3>
+                <p data-i18n="npmAudience">For Node.js toolchains</p>
+              </div>
+            </div>
+            <div class="command-line">
+              <code>npm install -g advai-cli</code>
+              <button type="button" class="copy-button" data-copy="npm install -g advai-cli" data-i18n="copy">Copy</button>
+            </div>
+            <a href="https://www.npmjs.com/package/advai-cli" target="_blank" rel="noreferrer" data-i18n="packageDetails">Package details ↗</a>
+          </article>
+        </div>
+        <p class="distribution-note" data-i18n="distributionNote">
+          PyPI provides the Python core. Homebrew packages it for system installation. The npm wrapper installs an isolated matching Python package.
+        </p>
+      </section>
+
+      <section class="capabilities-section" id="capabilities">
+        <div class="section-heading section-heading-light">
+          <p class="section-index" data-i18n="capabilitiesIndex">02 / CAPABILITIES</p>
+          <h2 data-i18n="capabilitiesHeading">A focused toolkit for local agent work.</h2>
+          <p data-i18n="capabilitiesLead">Keep your tools, skills, and data close to the machine where the work happens.</p>
+        </div>
+
+        <div class="capability-list">
+          <article>
+            <span>01</span>
+            <h3 data-i18n="skillTitle">Agent skills</h3>
+            <p data-i18n="skillBody">Install, update, and sync skills across Codex, Claude Code, Cursor, and other agent platforms.</p>
+            <code>advai skill list</code>
+          </article>
+          <article>
+            <span>02</span>
+            <h3 data-i18n="browserTitle">Browser automation</h3>
+            <p data-i18n="browserBody">Drive authenticated browser sessions through a local extension-backed bridge.</p>
+            <code>advai browser doctor</code>
+          </article>
+          <article>
+            <span>03</span>
+            <h3 data-i18n="knowledgeTitle">Knowledge bases</h3>
+            <p data-i18n="knowledgeBody">Create, sync, and search local document collections without moving the source files elsewhere.</p>
+            <code>advai kb search</code>
+          </article>
+          <article>
+            <span>04</span>
+            <h3 data-i18n="cliTitle">External CLIs</h3>
+            <p data-i18n="cliBody">Discover and run supported external command-line tools through one consistent entrypoint.</p>
+            <code>advai cli list</code>
+          </article>
+          <article>
+            <span>05</span>
+            <h3 data-i18n="chatTitle">Terminal AI chat</h3>
+            <p data-i18n="chatBody">Use an OpenAI-compatible backend from a terminal-native interface with local transcripts.</p>
+            <code>advai tui</code>
+          </article>
+        </div>
+      </section>
+
+      <section class="system-section" aria-labelledby="system-heading">
+        <div class="system-copy">
+          <p class="section-index" data-i18n="entrypointIndex">03 / ONE ENTRYPOINT</p>
+          <h2 id="system-heading" data-i18n="systemHeading">Choose the package manager. Keep the workflow.</h2>
+          <p data-i18n="systemBody">
+            Every distribution resolves to the same command surface and the same local-first runtime model.
+          </p>
+          <a href="https://github.com/Advai-X/advai-cli#architecture" target="_blank" rel="noreferrer" data-i18n="architectureLink">Read the architecture ↗</a>
+        </div>
+        <figure class="system-visual">
+          <img src="assets/hero.png" alt="Diagram of advai-cli distributions and local capabilities" data-i18n-alt="heroImageAlt" />
+        </figure>
+      </section>
+
+      <section class="quickstart-section" id="quickstart">
+        <div class="quickstart-copy">
+          <p class="section-index" data-i18n="quickstartIndex">04 / QUICK START</p>
+          <h2 data-i18n="quickstartHeading">From install to useful in four commands.</h2>
+          <p data-i18n="quickstartLead">Verify the runtime, inspect your skills, check the browser bridge, then start the terminal interface.</p>
+          <a class="text-link" href="https://github.com/Advai-X/advai-cli#quick-start" target="_blank" rel="noreferrer" data-i18n="fullDocs">Full documentation ↗</a>
+        </div>
+        <div class="quickstart-terminal" aria-label="Quick start commands" data-i18n-aria="quickstartLabel">
+          <div><span>01</span><code>advai info</code></div>
+          <div><span>02</span><code>advai skill list</code></div>
+          <div><span>03</span><code>advai browser doctor</code></div>
+          <div><span>04</span><code>advai tui</code></div>
+          <button type="button" class="copy-all" data-copy="advai info\nadvai skill list\nadvai browser doctor\nadvai tui" data-i18n="copyCommands">Copy commands</button>
+        </div>
+      </section>
+    </main>
+
+    <footer>
+      <div>
+        <a class="brand footer-brand" href="#top"><span class="brand-mark" aria-hidden="true">&gt;_</span><span>advai-cli</span></a>
+        <p data-i18n="footerText">Local-first tools for practical agent workflows.</p>
+      </div>
+      <div class="footer-links">
+        <a href="https://github.com/Advai-X/advai-cli" target="_blank" rel="noreferrer">GitHub</a>
+        <a href="https://pypi.org/project/advai-cli/" target="_blank" rel="noreferrer">PyPI</a>
+        <a href="https://formulae.brew.sh/formula/advai-cli" target="_blank" rel="noreferrer">Homebrew</a>
+        <a href="https://www.npmjs.com/package/advai-cli" target="_blank" rel="noreferrer">npm</a>
+        <a href="https://github.com/Advai-X/advai-cli/blob/main/LICENSE" target="_blank" rel="noreferrer">MIT</a>
+      </div>
+    </footer>
+
+    <div class="copy-toast" role="status" aria-live="polite"></div>
+  </body>
+</html>
